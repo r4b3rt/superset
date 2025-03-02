@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { useTheme, t } from '@superset-ui/core';
 
 import { Tooltip } from 'src/components/Tooltip';
@@ -62,7 +61,7 @@ dateadd(datetime("2020-03-01"), 2, day)`}</code>
       <h4>{t('Syntax')}</h4>
       <pre>
         <code>{`datetrunc([datetime], [dateunit])
-dateunit = (year | month | week)`}</code>
+dateunit = (year | quarter | month | week)`}</code>
       </pre>
       <h4>{t('Example')}</h4>
       <pre>
@@ -111,12 +110,12 @@ const StyledTooltip = (props: any) => {
       {({ css }) => (
         <Tooltip
           overlayClassName={css`
-            .ant-tooltip-content {
+            .antd5-tooltip-content {
               min-width: ${theme.gridUnit * 125}px;
               max-height: 410px;
               overflow-y: scroll;
 
-              .ant-tooltip-inner {
+              .antd5-tooltip-inner {
                 max-width: ${theme.gridUnit * 125}px;
                 h3 {
                   font-size: ${theme.typography.sizes.m}px;

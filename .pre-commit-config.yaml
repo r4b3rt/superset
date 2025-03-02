@@ -15,37 +15,93 @@
 # limitations under the License.
 #
 repos:
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.9.3
+  - repo: https://github.com/MarcoGorelli/auto-walrus
+    rev: 0.3.4
     hooks:
-      - id: isort
+      - id: auto-walrus
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.910
+    rev: v1.15.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
-  - repo: https://github.com/peterdemin/pip-compile-multi
-    rev: v2.4.1
-    hooks:
-      - id: pip-compile-multi-verify
+        args: [--check-untyped-defs]
+        additional_dependencies: [
+            types-simplejson,
+            types-python-dateutil,
+            types-requests,
+            # types-redis 4.6.0.5 is failing mypy
+            # because of https://github.com/python/typeshed/pull/10531
+            types-redis==4.6.0.4,
+            types-pytz,
+            types-croniter,
+            types-PyYAML,
+            types-setuptools,
+            types-paramiko,
+            types-Markdown,
+          ]
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v3.2.0
+    rev: v5.0.0
     hooks:
       - id: check-docstring-first
       - id: check-added-large-files
+        exclude: ^.*\.(geojson)$|^docs/static/img/screenshots/.*|^superset-frontend/CHANGELOG\.md$
       - id: check-yaml
         exclude: ^helm/superset/templates/
       - id: debug-statements
       - id: end-of-file-fixer
+        exclude: .*/lerna\.json$
       - id: trailing-whitespace
+        exclude: ^.*\.(snap)
         args: ["--markdown-linebreak-ext=md"]
-  - repo: https://github.com/psf/black
-    rev: 19.10b0
-    hooks:
-      - id: black
-        language_version: python3
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v2.2.1 # Use the sha or tag you want to point at
+  - repo: local
     hooks:
       - id: prettier
-        files: 'superset-frontend'
+        name: prettier
+        entry: bash -c 'cd superset-frontend && if [ -z "$SKIP_FIX" ]; then npm run format -- --log-level error; else npm run prettier-check; fi'
+        language: system
+        files: '^superset-frontend/(src|spec|cypress-base|plugins|packages|.storybook)/.+\.(js|jsx|ts|tsx|css|less|scss|sass)$|^superset-frontend/package\.json$'
+        pass_filenames: true
+      - id: eslint-frontend
+        name: eslint (frontend)
+        entry: bash -c 'cd superset-frontend && if [ -z "$SKIP_FIX" ]; then npm run lint-fix; else npm run eslint; fi'
+        language: system
+        pass_filenames: true
+        files: ^superset-frontend/.*\.(js|jsx|ts|tsx)$
+# TODO - re-assess using this script-based linting rather than the npm command. Both approaches have their merits
+#       - id: eslint
+#         name: eslint
+#         entry: ./scripts/eslint.sh
+#         language: script
+#         pass_filenames: true
+#         files: ^superset-frontend\/.*\.(js|jsx|ts|tsx)$
+      - id: eslint-docs
+        name: eslint (docs)
+        entry: bash -c 'cd docs && FILES=$(echo "$@" | sed "s|docs/||g") && yarn eslint --ext .js,.jsx,.ts,.tsx --quiet $([ -z "$SKIP_FIX" ] && echo "--fix") $FILES'
+        language: system
+        pass_filenames: true
+        files: ^docs/.*\.(js|jsx|ts|tsx)$
+      - id: type-checking-frontend
+        name: Type-Checking (Frontend)
+        entry: bash -c './scripts/check-type.js package=superset-frontend excludeDeclarationDir=cypress-base'
+        language: system
+        files: ^superset-frontend\/.*\.(js|jsx|ts|tsx)$
+        exclude: ^superset-frontend/cypress-base\/
+        require_serial: true
+  # blacklist unsafe functions like make_url (see #19526)
+  - repo: https://github.com/skorokithakis/blacklist-pre-commit-hook
+    rev: e2f070289d8eddcaec0b580d3bde29437e7c8221
+    hooks:
+      - id: blacklist
+        args: ["--blacklisted-names=make_url", "--ignore=tests/"]
+  - repo: https://github.com/norwoodj/helm-docs
+    rev: v1.14.2
+    hooks:
+      - id: helm-docs
+        files: helm
+        verbose: false
+        args: ["--log-level", "error"]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.7
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

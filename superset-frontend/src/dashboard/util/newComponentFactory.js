@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import shortid from 'shortid';
+import { nanoid } from 'nanoid';
 import { t } from '@superset-ui/core';
 
 import {
@@ -28,12 +28,14 @@ import {
   ROW_TYPE,
   TABS_TYPE,
   TAB_TYPE,
+  DYNAMIC_TYPE,
 } from './componentTypes';
 
 import {
   MEDIUM_HEADER,
   BACKGROUND_TRANSPARENT,
   GRID_DEFAULT_CHART_WIDTH,
+  GRID_COLUMN_COUNT,
 } from './constants';
 
 const typeToDefaultMetaData = {
@@ -44,7 +46,7 @@ const typeToDefaultMetaData = {
   },
   [DIVIDER_TYPE]: null,
   [HEADER_TYPE]: {
-    text: 'New header',
+    text: t('New header'),
     headerSize: MEDIUM_HEADER,
     background: BACKGROUND_TRANSPARENT,
   },
@@ -56,10 +58,14 @@ const typeToDefaultMetaData = {
     defaultText: t('Tab title'),
     placeholder: t('Tab title'),
   },
+  [DYNAMIC_TYPE]: {
+    width: GRID_COLUMN_COUNT,
+    background: BACKGROUND_TRANSPARENT,
+  },
 };
 
 function uuid(type) {
-  return `${type}-${shortid.generate()}`;
+  return `${type}-${nanoid()}`;
 }
 
 export default function entityFactory(type, meta, parents = []) {

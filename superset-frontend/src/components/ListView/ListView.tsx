@@ -17,16 +17,15 @@
  * under the License.
  */
 import { t, styled } from '@superset-ui/core';
-import React, { useEffect } from 'react';
-import { Empty } from 'src/common/components';
+import { useCallback, useEffect, useRef, useState, ReactNode } from 'react';
 import Alert from 'src/components/Alert';
-import EmptyImage from 'src/assets/images/empty.svg';
 import cx from 'classnames';
 import Button from 'src/components/Button';
 import Icons from 'src/components/Icons';
 import IndeterminateCheckbox from 'src/components/IndeterminateCheckbox';
 import Pagination from 'src/components/Pagination';
 import TableCollection from 'src/components/TableCollection';
+import BulkTagModal from 'src/features/tags/BulkTagModal';
 import CardCollection from './CardCollection';
 import FilterControls from './Filters';
 import { CardSortSelect } from './CardSortSelect';
@@ -38,6 +37,7 @@ import {
   ViewModeType,
 } from './types';
 import { ListViewError, useListViewState } from './utils';
+import { EmptyState, EmptyStateProps } from '../EmptyState';
 
 const ListViewStyles = styled.div`
   text-align: center;
@@ -67,8 +67,8 @@ const ListViewStyles = styled.div`
       overflow-x: auto;
     }
 
-    .ant-empty {
-      .ant-empty-image {
+    .antd5-empty {
+      .antd5-empty-image {
         height: auto;
       }
     }
@@ -88,35 +88,38 @@ const ListViewStyles = styled.div`
 `;
 
 const BulkSelectWrapper = styled(Alert)`
-  border-radius: 0;
-  margin-bottom: 0;
-  color: #3d3d3d;
-  background-color: ${({ theme }) => theme.colors.primary.light4};
+  ${({ theme }) => `
+    border-radius: 0;
+    margin-bottom: 0;
+    color: ${theme.colors.grayscale.dark1};
+    background-color: ${theme.colors.primary.light4};
 
-  .selectedCopy {
-    display: inline-block;
-    padding: ${({ theme }) => theme.gridUnit * 2}px 0;
-  }
+    .selectedCopy {
+      display: inline-block;
+      padding: ${theme.gridUnit * 2}px 0;
+    }
 
-  .deselect-all {
-    color: #1985a0;
-    margin-left: ${({ theme }) => theme.gridUnit * 4}px;
-  }
+    .deselect-all, .tag-btn {
+      color: ${theme.colors.primary.base};
+      margin-left: ${theme.gridUnit * 4}px;
+    }
 
-  .divider {
-    margin: ${({ theme: { gridUnit } }) =>
-      `${-gridUnit * 2}px 0 ${-gridUnit * 2}px ${gridUnit * 4}px`};
-    width: 1px;
-    height: ${({ theme }) => theme.gridUnit * 8}px;
-    box-shadow: inset -1px 0px 0px #dadada;
-    display: inline-flex;
-    vertical-align: middle;
-    position: relative;
-  }
+    .divider {
+      margin: ${`${-theme.gridUnit * 2}px 0 ${-theme.gridUnit * 2}px ${
+        theme.gridUnit * 4
+      }px`};
+      width: 1px;
+      height: ${theme.gridUnit * 8}px;
+      box-shadow: inset -1px 0px 0px ${theme.colors.grayscale.light2};
+      display: inline-flex;
+      vertical-align: middle;
+      position: relative;
+    }
 
-  .ant-alert-close-icon {
-    margin-top: ${({ theme }) => theme.gridUnit * 1.5}px;
-  }
+    .ant-alert-close-icon {
+      margin-top: ${theme.gridUnit * 1.5}px;
+    }
+  `}
 `;
 
 const bulkSelectColumnConfig = {
@@ -127,6 +130,7 @@ const bulkSelectColumnConfig = {
     <IndeterminateCheckbox
       {...getToggleAllRowsSelectedProps()}
       id="header-toggle-all"
+      data-test="header-toggle-all"
     />
   ),
   id: 'selection',
@@ -136,6 +140,7 @@ const bulkSelectColumnConfig = {
 const ViewModeContainer = styled.div`
   padding-right: ${({ theme }) => theme.gridUnit * 4}px;
   margin-top: ${({ theme }) => theme.gridUnit * 5 + 1}px;
+  white-space: nowrap;
   display: inline-block;
 
   .toggle-button {
@@ -204,28 +209,31 @@ export interface ListViewProps<T extends object = any> {
   count: number;
   pageSize: number;
   fetchData: (conf: FetchDataConfig) => any;
+  refreshData: () => void;
+  addSuccessToast: (msg: string) => void;
+  addDangerToast: (msg: string) => void;
   loading: boolean;
   className?: string;
   initialSort?: SortColumn[];
   filters?: Filters;
   bulkActions?: Array<{
     key: string;
-    name: React.ReactNode;
+    name: ReactNode;
     onSelect: (rows: any[]) => any;
     type?: 'primary' | 'secondary' | 'danger';
   }>;
   bulkSelectEnabled?: boolean;
   disableBulkSelect?: () => void;
-  renderBulkSelectCopy?: (selects: any[]) => React.ReactNode;
-  renderCard?: (row: T & { loading: boolean }) => React.ReactNode;
+  renderBulkSelectCopy?: (selects: any[]) => ReactNode;
+  renderCard?: (row: T & { loading: boolean }) => ReactNode;
   cardSortSelectOptions?: Array<CardSortSelectOption>;
   defaultViewMode?: ViewModeType;
   highlightRowId?: number;
   showThumbnails?: boolean;
-  emptyState?: {
-    message?: string;
-    slot?: React.ReactNode;
-  };
+  emptyState?: EmptyStateProps;
+  columnsForWrapText?: string[];
+  enableBulkTag?: boolean;
+  bulkTagResourceName?: string;
 }
 
 function ListView<T extends object = any>({
@@ -234,6 +242,7 @@ function ListView<T extends object = any>({
   count,
   pageSize: initialPageSize,
   fetchData,
+  refreshData,
   loading,
   initialSort = [],
   className = '',
@@ -247,7 +256,12 @@ function ListView<T extends object = any>({
   cardSortSelectOptions,
   defaultViewMode = 'card',
   highlightRowId,
-  emptyState = {},
+  emptyState,
+  columnsForWrapText,
+  enableBulkTag = false,
+  bulkTagResourceName,
+  addSuccessToast,
+  addDangerToast,
 }: ListViewProps<T>) {
   const {
     getTableProps,
@@ -258,10 +272,12 @@ function ListView<T extends object = any>({
     pageCount = 1,
     gotoPage,
     applyFilterValue,
+    setSortBy,
     selectedFlatRows,
     toggleAllRowsSelected,
     setViewMode,
-    state: { pageIndex, pageSize, internalFilters, viewMode },
+    state: { pageIndex, pageSize, internalFilters, sortBy, viewMode },
+    query,
   } = useListViewState({
     bulkSelectColumnConfig,
     bulkSelectMode: bulkSelectEnabled && Boolean(bulkActions.length),
@@ -275,6 +291,7 @@ function ListView<T extends object = any>({
     renderCard: Boolean(renderCard),
     defaultViewMode,
   });
+  const allowBulkTagActions = bulkTagResourceName && enableBulkTag;
   const filterable = Boolean(filters.length);
   if (filterable) {
     const columnAccessors = columns.reduce(
@@ -290,23 +307,50 @@ function ListView<T extends object = any>({
     });
   }
 
+  const filterControlsRef = useRef<{ clearFilters: () => void }>(null);
+
+  const handleClearFilterControls = useCallback(() => {
+    if (query.filters) {
+      filterControlsRef.current?.clearFilters();
+    }
+  }, [query.filters]);
+
   const cardViewEnabled = Boolean(renderCard);
+  const [showBulkTagModal, setShowBulkTagModal] = useState<boolean>(false);
 
   useEffect(() => {
     // discard selections if bulk select is disabled
     if (!bulkSelectEnabled) toggleAllRowsSelected(false);
   }, [bulkSelectEnabled, toggleAllRowsSelected]);
 
+  useEffect(() => {
+    if (!loading && pageIndex > pageCount - 1 && pageCount > 0) {
+      gotoPage(0);
+    }
+  }, [gotoPage, loading, pageCount, pageIndex]);
+
   return (
     <ListViewStyles>
+      {allowBulkTagActions && (
+        <BulkTagModal
+          show={showBulkTagModal}
+          selected={selectedFlatRows}
+          refreshData={refreshData}
+          resourceName={bulkTagResourceName}
+          addSuccessToast={addSuccessToast}
+          addDangerToast={addDangerToast}
+          onHide={() => setShowBulkTagModal(false)}
+        />
+      )}
       <div data-test={className} className={`superset-list-view ${className}`}>
         <div className="header">
           {cardViewEnabled && (
             <ViewModeToggle mode={viewMode} setMode={setViewMode} />
           )}
-          <div className="controls">
+          <div className="controls" data-test="filters-select">
             {filterable && (
               <FilterControls
+                ref={filterControlsRef}
                 filters={filters}
                 internalFilters={internalFilters}
                 updateFilterValue={applyFilterValue}
@@ -314,11 +358,9 @@ function ListView<T extends object = any>({
             )}
             {viewMode === 'card' && cardSortSelectOptions && (
               <CardSortSelect
-                initialSort={initialSort}
-                onChange={fetchData}
+                initialSort={sortBy}
+                onChange={(value: SortColumn[]) => setSortBy(value)}
                 options={cardSortSelectOptions}
-                pageIndex={pageIndex}
-                pageSize={pageSize}
               />
             )}
           </div>
@@ -363,6 +405,17 @@ function ListView<T extends object = any>({
                           {action.name}
                         </Button>
                       ))}
+                      {enableBulkTag && (
+                        <span
+                          data-test="bulk-select-tag-btn"
+                          role="button"
+                          tabIndex={0}
+                          className="tag-btn"
+                          onClick={() => setShowBulkTagModal(true)}
+                        >
+                          {t('Add Tag')}
+                        </span>
+                      )}
                     </>
                   )}
                 </>
@@ -389,26 +442,37 @@ function ListView<T extends object = any>({
               columns={columns}
               loading={loading}
               highlightRowId={highlightRowId}
+              columnsForWrapText={columnsForWrapText}
             />
           )}
           {!loading && rows.length === 0 && (
-            <EmptyWrapper className={viewMode}>
-              <Empty
-                image={<EmptyImage />}
-                description={emptyState.message || t('No Data')}
-              >
-                {emptyState.slot || null}
-              </Empty>
+            <EmptyWrapper className={viewMode} data-test="empty-state">
+              {query.filters ? (
+                <EmptyState
+                  title={t('No results match your filter criteria')}
+                  description={t('Try different criteria to display results.')}
+                  size="large"
+                  image="filter-results.svg"
+                  buttonAction={() => handleClearFilterControls()}
+                  buttonText={t('clear all filters')}
+                />
+              ) : (
+                <EmptyState
+                  {...emptyState}
+                  title={emptyState?.title || t('No Data')}
+                  size="large"
+                  image={emptyState?.image || 'filter-results.svg'}
+                />
+              )}
             </EmptyWrapper>
           )}
         </div>
       </div>
-
       {rows.length > 0 && (
         <div className="pagination-container">
           <Pagination
             totalPages={pageCount || 0}
-            currentPage={pageCount ? pageIndex + 1 : 0}
+            currentPage={pageCount && pageIndex < pageCount ? pageIndex + 1 : 0}
             onChange={(p: number) => gotoPage(p - 1)}
             hideFirstAndLastPageLinks
           />

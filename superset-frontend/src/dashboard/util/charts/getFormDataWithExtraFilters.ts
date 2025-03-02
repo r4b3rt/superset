@@ -16,32 +16,67 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { DataRecordFilters, JsonObject } from '@superset-ui/core';
-import { ChartQueryPayload, Charts, LayoutItem } from 'src/dashboard/types';
+import {
+  DataMask,
+  DataMaskStateWithId,
+  DataRecordFilters,
+  DataRecordValue,
+  JsonObject,
+  PartialFilters,
+} from '@superset-ui/core';
+import { ChartConfiguration, ChartQueryPayload } from 'src/dashboard/types';
 import { getExtraFormData } from 'src/dashboard/components/nativeFilters/utils';
-import { DataMaskStateWithId } from 'src/dataMask/types';
 import { areObjectsEqual } from 'src/reduxUtils';
+import { isEqual } from 'lodash';
 import getEffectiveExtraFilters from './getEffectiveExtraFilters';
-import { ChartConfiguration, NativeFiltersState } from '../../reducers/types';
 import { getAllActiveFilters } from '../activeAllDashboardFilters';
+
+interface CachedFormData {
+  extra_form_data?: JsonObject;
+  extra_filters: {
+    col: string;
+    op: string;
+    val: DataRecordValue[];
+  }[];
+  own_color_scheme?: string;
+  color_scheme?: string;
+  color_namespace?: string;
+  chart_id: number;
+  label_colors?: Record<string, string>;
+  shared_label_colors?: string[];
+  map_label_colors?: Record<string, string>;
+}
+
+export type CachedFormDataWithExtraControls = CachedFormData & {
+  [key: string]: any;
+};
 
 // We cache formData objects so that our connected container components don't always trigger
 // render cascades. we cannot leverage the reselect library because our cache size is >1
-const cachedFiltersByChart = {};
-const cachedFormdataByChart = {};
+const cachedFiltersByChart: Record<number, DataRecordFilters> = {};
+const cachedFormdataByChart: Record<
+  number,
+  CachedFormData & {
+    dataMask: DataMask;
+    extraControls: Record<string, string | boolean | null>;
+  }
+> = {};
 
 export interface GetFormDataWithExtraFiltersArguments {
   chartConfiguration: ChartConfiguration;
   chart: ChartQueryPayload;
-  charts: Charts;
   filters: DataRecordFilters;
-  layout: { [key: string]: LayoutItem };
   colorScheme?: string;
+  ownColorScheme?: string;
   colorNamespace?: string;
   sliceId: number;
   dataMask: DataMaskStateWithId;
-  nativeFilters: NativeFiltersState;
-  labelColors?: Record<string, string>;
+  nativeFilters: PartialFilters;
+  extraControls: Record<string, string | boolean | null>;
+  labelsColor?: Record<string, string>;
+  labelsColorMap?: Record<string, string>;
+  sharedLabelsColors?: string[];
+  allSliceIds: number[];
 }
 
 // this function merge chart's formData with dashboard filters value,
@@ -49,32 +84,41 @@ export interface GetFormDataWithExtraFiltersArguments {
 // filters param only contains those applicable to this chart.
 export default function getFormDataWithExtraFilters({
   chart,
-  charts,
   filters,
   nativeFilters,
   chartConfiguration,
   colorScheme,
+  ownColorScheme,
   colorNamespace,
   sliceId,
-  layout,
   dataMask,
-  labelColors,
+  extraControls,
+  labelsColor,
+  labelsColorMap,
+  sharedLabelsColors,
+  allSliceIds,
 }: GetFormDataWithExtraFiltersArguments) {
   // if dashboard metadata + filters have not changed, use cache if possible
   const cachedFormData = cachedFormdataByChart[sliceId];
   if (
     cachedFiltersByChart[sliceId] === filters &&
-    areObjectsEqual(cachedFormData?.color_scheme, colorScheme, {
-      ignoreUndefined: true,
-    }) &&
+    areObjectsEqual(cachedFormData?.own_color_scheme, ownColorScheme) &&
+    areObjectsEqual(cachedFormData?.color_scheme, colorScheme) &&
     areObjectsEqual(cachedFormData?.color_namespace, colorNamespace, {
       ignoreUndefined: true,
     }) &&
-    areObjectsEqual(cachedFormData?.label_colors, labelColors, {
+    areObjectsEqual(cachedFormData?.label_colors, labelsColor, {
       ignoreUndefined: true,
     }) &&
+    areObjectsEqual(cachedFormData?.map_label_colors, labelsColorMap, {
+      ignoreUndefined: true,
+    }) &&
+    isEqual(cachedFormData?.shared_label_colors, sharedLabelsColors) &&
     !!cachedFormData &&
     areObjectsEqual(cachedFormData?.dataMask, dataMask, {
+      ignoreUndefined: true,
+    }) &&
+    areObjectsEqual(cachedFormData?.extraControls, extraControls, {
       ignoreUndefined: true,
     })
   ) {
@@ -85,32 +129,35 @@ export default function getFormDataWithExtraFilters({
   const activeFilters = getAllActiveFilters({
     chartConfiguration,
     dataMask,
-    layout,
-    nativeFilters: nativeFilters.filters,
+    nativeFilters,
+    allSliceIds,
   });
   const filterIdsAppliedOnChart = Object.entries(activeFilters)
     .filter(([, { scope }]) => scope.includes(chart.id))
     .map(([filterId]) => filterId);
   if (filterIdsAppliedOnChart.length) {
     extraData = {
-      extra_form_data: getExtraFormData(
-        dataMask,
-        charts,
-        filterIdsAppliedOnChart,
-      ),
+      extra_form_data: getExtraFormData(dataMask, filterIdsAppliedOnChart),
     };
   }
 
-  const formData = {
-    ...chart.formData,
-    label_colors: labelColors,
+  const formData: CachedFormDataWithExtraControls = {
+    ...chart.form_data,
+    chart_id: chart.id,
+    label_colors: labelsColor,
+    shared_label_colors: sharedLabelsColors,
+    map_label_colors: labelsColorMap,
     ...(colorScheme && { color_scheme: colorScheme }),
+    ...(ownColorScheme && {
+      own_color_scheme: ownColorScheme,
+    }),
     extra_filters: getEffectiveExtraFilters(filters),
     ...extraData,
+    ...extraControls,
   };
 
   cachedFiltersByChart[sliceId] = filters;
-  cachedFormdataByChart[sliceId] = { ...formData, dataMask };
+  cachedFormdataByChart[sliceId] = { ...formData, dataMask, extraControls };
 
   return formData;
 }

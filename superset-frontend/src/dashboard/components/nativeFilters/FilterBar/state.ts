@@ -19,29 +19,21 @@
 /* eslint-disable no-param-reassign */
 import { useSelector } from 'react-redux';
 import {
-  Filters,
-  FilterSets as FilterSetsType,
-} from 'src/dashboard/reducers/types';
-import {
   DataMaskState,
   DataMaskStateWithId,
   DataMaskWithId,
-} from 'src/dataMask/types';
+  Filter,
+  Filters,
+} from '@superset-ui/core';
 import { useEffect, useMemo, useState } from 'react';
 import { ChartsState, RootState } from 'src/dashboard/types';
 import { NATIVE_FILTER_PREFIX } from '../FiltersConfigModal/utils';
-import { Filter } from '../types';
-
-export const useFilterSets = () =>
-  useSelector<any, FilterSetsType>(
-    state => state.nativeFilters.filterSets || {},
-  );
 
 export const useFilters = () => {
   const preselectedNativeFilters = useSelector<any, Filters>(
     state => state.dashboardState?.preselectNativeFilters,
   );
-  const nativeFilters = useSelector<any, Filters>(
+  const nativeFilters = useSelector<RootState, Filters>(
     state => state.nativeFilters.filters,
   );
   return useMemo(
@@ -85,7 +77,6 @@ export const useFilterUpdates = (
 ) => {
   const filters = useFilters();
   const dataMaskApplied = useNativeFiltersDataMask();
-
   useEffect(() => {
     // Remove deleted filters from local state
     Object.keys(dataMaskSelected).forEach(selectedId => {

@@ -16,9 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { render, screen } from 'spec/helpers/testing-library';
-import userEvent from '@testing-library/user-event';
+import { render, screen, userEvent } from 'spec/helpers/testing-library';
 import TableView, { TableViewProps } from '.';
 
 const mockedProps: TableViewProps = {
@@ -190,4 +188,22 @@ test('should render the right page', () => {
   expect(screen.getByText('10')).toBeInTheDocument();
   expect(screen.getByText('Kate')).toBeInTheDocument();
   expect(screen.queryByText('Emily')).not.toBeInTheDocument();
+});
+
+test('should render the right wrap content text by columnsForWrapText', () => {
+  const props = {
+    ...mockedProps,
+    columnsForWrapText: ['Name'],
+  };
+  render(<TableView {...props} />);
+
+  expect(screen.getAllByTestId('table-row-cell')[0]).toHaveClass(
+    'table-cell__nowrap',
+  );
+  expect(screen.getAllByTestId('table-row-cell')[1]).toHaveClass(
+    'table-cell__nowrap',
+  );
+  expect(screen.getAllByTestId('table-row-cell')[2]).toHaveClass(
+    'table-cell__wrap',
+  );
 });

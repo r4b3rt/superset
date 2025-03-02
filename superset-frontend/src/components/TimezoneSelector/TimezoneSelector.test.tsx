@@ -16,56 +16,124 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import moment from 'moment-timezone';
-import { render, screen } from 'spec/helpers/testing-library';
-import userEvent from '@testing-library/user-event';
-import TimezoneSelector from './index';
+import { FC } from 'react';
+import { extendedDayjs } from 'src/utils/dates';
+import {
+  render,
+  screen,
+  userEvent,
+  waitFor,
+} from 'spec/helpers/testing-library';
+import type { TimezoneSelectorProps } from './index';
 
-describe('TimezoneSelector', () => {
-  let timezone: string | undefined;
-  const onTimezoneChange = jest.fn(zone => {
-    timezone = zone;
+const loadComponent = (mockCurrentTime?: string) => {
+  if (mockCurrentTime) {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(mockCurrentTime));
+  }
+  return new Promise<FC<TimezoneSelectorProps>>(resolve => {
+    const { default: TimezoneSelector } = module.require('./index');
+    resolve(TimezoneSelector);
   });
-  beforeEach(() => {
-    timezone = undefined;
-  });
-  it('renders a TimezoneSelector with a default if undefined', () => {
-    jest.spyOn(moment.tz, 'guess').mockReturnValue('America/New_York');
-    render(
-      <TimezoneSelector
-        onTimezoneChange={onTimezoneChange}
-        timezone={timezone}
-      />,
-    );
-    expect(onTimezoneChange).toHaveBeenCalledWith('America/Nassau');
-  });
-  it('should properly select values from the offsetsToName map', async () => {
-    jest.spyOn(moment.tz, 'guess').mockReturnValue('America/New_York');
-    render(
-      <TimezoneSelector
-        onTimezoneChange={onTimezoneChange}
-        timezone={timezone}
-      />,
-    );
+};
 
-    const select = screen.getByRole('combobox', {
-      name: 'Timezone selector',
-    });
-    expect(select).toBeInTheDocument();
-    userEvent.click(select);
-    const selection = await screen.findByTitle('GMT -06:00 (America/Belize)');
-    expect(selection).toBeInTheDocument();
-    userEvent.click(selection);
-    expect(selection).toBeVisible();
-  });
-  it('renders a TimezoneSelector with the closest value if passed in', async () => {
-    render(
-      <TimezoneSelector
-        onTimezoneChange={onTimezoneChange}
-        timezone="America/Los_Angeles"
-      />,
-    );
-    expect(onTimezoneChange).toHaveBeenLastCalledWith('America/Vancouver');
-  });
+const getSelectOptions = () =>
+  waitFor(() => document.querySelectorAll('.ant-select-item-option-content'));
+
+const openSelectMenu = () => {
+  const searchInput = screen.getByRole('combobox');
+  userEvent.click(searchInput);
+};
+
+jest.spyOn(extendedDayjs.tz, 'guess').mockReturnValue('America/New_York');
+
+afterEach(() => {
+  jest.useRealTimers();
+});
+
+test('use the timezone from `dayjs` if no timezone provided', async () => {
+  const TimezoneSelector = await loadComponent('2022-01-01');
+  const onTimezoneChange = jest.fn();
+  render(<TimezoneSelector onTimezoneChange={onTimezoneChange} />);
+  expect(onTimezoneChange).toHaveBeenCalledTimes(1);
+  expect(onTimezoneChange).toHaveBeenCalledWith('America/Detroit');
+});
+
+test('update to closest deduped timezone when timezone is provided', async () => {
+  const TimezoneSelector = await loadComponent('2022-01-01');
+  const onTimezoneChange = jest.fn();
+  render(
+    <TimezoneSelector
+      onTimezoneChange={onTimezoneChange}
+      timezone="America/Tijuana"
+    />,
+  );
+  expect(onTimezoneChange).toHaveBeenCalledTimes(1);
+  expect(onTimezoneChange).toHaveBeenLastCalledWith('America/Los_Angeles');
+});
+
+test('use the default timezone when an invalid timezone is provided', async () => {
+  const TimezoneSelector = await loadComponent('2022-01-01');
+  const onTimezoneChange = jest.fn();
+  render(
+    <TimezoneSelector onTimezoneChange={onTimezoneChange} timezone="UTC" />,
+  );
+  expect(onTimezoneChange).toHaveBeenCalledTimes(1);
+  expect(onTimezoneChange).toHaveBeenLastCalledWith('Africa/Abidjan');
+});
+
+test('render timezones in correct order for standard time', async () => {
+  const TimezoneSelector = await loadComponent('2022-01-01');
+  const onTimezoneChange = jest.fn();
+  render(
+    <TimezoneSelector
+      onTimezoneChange={onTimezoneChange}
+      timezone="America/Nassau"
+    />,
+  );
+  openSelectMenu();
+  const options = await getSelectOptions();
+  expect(options[0]).toHaveTextContent('GMT -05:00 (Eastern Standard Time)');
+  expect(options[1]).toHaveTextContent('GMT -11:00 (Pacific/Midway)');
+  expect(options[2]).toHaveTextContent('GMT -11:00 (Pacific/Niue)');
+});
+
+test('can select a timezone values and returns canonical timezone name', async () => {
+  const TimezoneSelector = await loadComponent('2022-01-01');
+  const onTimezoneChange = jest.fn();
+  render(
+    <TimezoneSelector
+      onTimezoneChange={onTimezoneChange}
+      timezone="Africa/Abidjan"
+    />,
+  );
+  openSelectMenu();
+
+  const searchInput = screen.getByRole('combobox');
+  // search for mountain time
+  userEvent.type(searchInput, 'mou');
+  const findTitle = 'GMT -07:00 (Mountain Standard Time)';
+  const selectOption = await screen.findByTitle(findTitle);
+  userEvent.click(selectOption);
+  expect(onTimezoneChange).toHaveBeenCalledTimes(1);
+  expect(onTimezoneChange).toHaveBeenLastCalledWith('America/Boise');
+});
+
+test('can update props and rerender with different values', async () => {
+  const TimezoneSelector = await loadComponent('2022-01-01');
+  const onTimezoneChange = jest.fn();
+  const { rerender } = render(
+    <TimezoneSelector
+      onTimezoneChange={onTimezoneChange}
+      timezone="Asia/Dubai"
+    />,
+  );
+  expect(screen.getByTitle('GMT +04:00 (Asia/Dubai)')).toBeInTheDocument();
+  rerender(
+    <TimezoneSelector
+      onTimezoneChange={onTimezoneChange}
+      timezone="Australia/Perth"
+    />,
+  );
+  expect(screen.getByTitle('GMT +08:00 (Australia/Perth)')).toBeInTheDocument();
 });

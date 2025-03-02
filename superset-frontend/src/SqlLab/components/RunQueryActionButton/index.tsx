@@ -16,28 +16,30 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { t, styled, supersetTheme } from '@superset-ui/core';
+import { useMemo, FC, ReactElement } from 'react';
 
-import { Menu } from 'src/common/components';
-import Button, { ButtonProps } from 'src/components/Button';
+import { t, styled, useTheme } from '@superset-ui/core';
+
+import Button from 'src/components/Button';
 import Icons from 'src/components/Icons';
+import { DropdownButton } from 'src/components/DropdownButton';
+import { detectOS } from 'src/utils/common';
+import { QueryButtonProps } from 'src/SqlLab/types';
+import useQueryEditor from 'src/SqlLab/hooks/useQueryEditor';
 import {
-  DropdownButton,
-  DropdownButtonProps,
-} from 'src/components/DropdownButton';
+  LOG_ACTIONS_SQLLAB_RUN_QUERY,
+  LOG_ACTIONS_SQLLAB_STOP_QUERY,
+} from 'src/logger/LogUtils';
+import useLogAction from 'src/logger/useLogAction';
 
-interface Props {
+export interface RunQueryActionButtonProps {
+  queryEditorId: string;
   allowAsync: boolean;
   queryState?: string;
   runQuery: (c?: boolean) => void;
-  selectedText?: string;
   stopQuery: () => void;
-  sql: string;
-  overlayCreateAsMenu: typeof Menu | null;
+  overlayCreateAsMenu: ReactElement | null;
 }
-
-type QueryButtonProps = DropdownButtonProps | ButtonProps;
 
 const buildText = (
   shouldShowStopButton: boolean,
@@ -61,7 +63,13 @@ const onClick = (
   allowAsync: boolean,
   runQuery: (c?: boolean) => void = () => undefined,
   stopQuery = () => {},
+  logAction: (name: string, payload: Record<string, any>) => void,
 ): void => {
+  const eventName = shouldShowStopButton
+    ? LOG_ACTIONS_SQLLAB_STOP_QUERY
+    : LOG_ACTIONS_SQLLAB_RUN_QUERY;
+
+  logAction(eventName, { shortcut: false });
   if (shouldShowStopButton) return stopQuery();
   if (allowAsync) {
     return runQuery(true);
@@ -79,40 +87,60 @@ const StyledButton = styled.span`
     }
     span[name='caret-down'] {
       display: flex;
-      margin-right: ${({ theme }) => theme.gridUnit * -2}px;
+      margin-left: ${({ theme }) => theme.gridUnit * 1}px;
     }
   }
 `;
 
 const RunQueryActionButton = ({
   allowAsync = false,
+  queryEditorId,
   queryState,
-  selectedText,
-  sql = '',
   overlayCreateAsMenu,
   runQuery,
   stopQuery,
-}: Props) => {
+}: RunQueryActionButtonProps) => {
+  const theme = useTheme();
+  const logAction = useLogAction({ queryEditorId });
+  const userOS = detectOS();
+
+  const { selectedText, sql } = useQueryEditor(queryEditorId, [
+    'selectedText',
+    'sql',
+  ]);
+
   const shouldShowStopBtn =
     !!queryState && ['running', 'pending'].indexOf(queryState) > -1;
 
-  const ButtonComponent: React.FC<QueryButtonProps> = overlayCreateAsMenu
-    ? (DropdownButton as React.FC)
+  const ButtonComponent: FC<QueryButtonProps> = overlayCreateAsMenu
+    ? (DropdownButton as FC)
     : Button;
 
-  const isDisabled = !sql.trim();
+  const sqlContent = selectedText || sql || '';
+  const isDisabled = !sqlContent
+    ?.replace(/(\/\*[^*]*\*\/)|(\/\/[^*]*)|(--[^.].*)/gm, '')
+    .trim();
+
+  const stopButtonTooltipText = useMemo(
+    () =>
+      userOS === 'MacOS'
+        ? t('Stop running (Ctrl + x)')
+        : t('Stop running (Ctrl + e)'),
+    [userOS],
+  );
 
   return (
     <StyledButton>
       <ButtonComponent
+        data-test="run-query-action"
         onClick={() =>
-          onClick(shouldShowStopBtn, allowAsync, runQuery, stopQuery)
+          onClick(shouldShowStopBtn, allowAsync, runQuery, stopQuery, logAction)
         }
         disabled={isDisabled}
         tooltip={
           (!isDisabled &&
             (shouldShowStopBtn
-              ? t('Stop running (Ctrl + x)')
+              ? stopButtonTooltipText
               : t('Run query (Ctrl + Return)'))) as string
         }
         cta
@@ -123,15 +151,17 @@ const RunQueryActionButton = ({
                 <Icons.CaretDown
                   iconColor={
                     isDisabled
-                      ? supersetTheme.colors.grayscale.base
-                      : supersetTheme.colors.grayscale.light5
+                      ? theme.colors.grayscale.base
+                      : theme.colors.grayscale.light5
                   }
                   name="caret-down"
                 />
               ),
               trigger: 'click',
             }
-          : { buttonStyle: 'primary' })}
+          : {
+              buttonStyle: shouldShowStopBtn ? 'warning' : 'primary',
+            })}
       >
         {buildText(shouldShowStopBtn, selectedText)}
       </ButtonComponent>

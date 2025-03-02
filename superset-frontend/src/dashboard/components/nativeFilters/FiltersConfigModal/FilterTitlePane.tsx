@@ -16,111 +16,115 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { PlusOutlined } from '@ant-design/icons';
-import { styled, t, useTheme } from '@superset-ui/core';
-import React from 'react';
+import { useRef, FC } from 'react';
+
+import { NativeFilterType, styled, t, useTheme } from '@superset-ui/core';
+import { Button } from 'src/components';
+import Icons from 'src/components/Icons';
+
 import FilterTitleContainer from './FilterTitleContainer';
 import { FilterRemoval } from './types';
 
 interface Props {
   restoreFilter: (id: string) => void;
   getFilterTitle: (id: string) => string;
-  onRearrage: (dragIndex: number, targetIndex: number) => void;
+  onRearrange: (dragIndex: number, targetIndex: number) => void;
   onRemove: (id: string) => void;
   onChange: (id: string) => void;
-  onEdit: (filterId: string, action: 'add' | 'remove') => void;
+  onAdd: (type: NativeFilterType) => void;
   removedFilters: Record<string, FilterRemoval>;
   currentFilterId: string;
-  filterGroups: string[][];
+  filters: string[];
   erroredFilters: string[];
 }
-
-const StyledHeader = styled.div`
-  ${({ theme }) => `
-    color: ${theme.colors.grayscale.dark1};
-    font-size: ${theme.typography.sizes.l}px;
-    padding-top: ${theme.gridUnit * 4}px;
-    padding-right: ${theme.gridUnit * 4}px;
-    padding-left: ${theme.gridUnit * 4}px;
-    padding-bottom: ${theme.gridUnit * 2}px;
-  `}
-`;
 
 const TabsContainer = styled.div`
   height: 100%;
   display: flex;
   flex-direction: column;
+  padding: ${({ theme }) => theme.gridUnit * 3}px;
+  padding-top: 2px;
 `;
 
-const StyledAddFilterBox = styled.div`
-  color: ${({ theme }) => theme.colors.primary.dark1};
-  padding: ${({ theme }) => theme.gridUnit * 2}px;
-  border-top: 1px solid ${({ theme }) => theme.colors.grayscale.light2};
-  cursor: pointer;
-  margin-top: auto;
-  &:hover {
-    color: ${({ theme }) => theme.colors.primary.base};
-  }
-`;
-
-const FilterTitlePane: React.FC<Props> = ({
+const FilterTitlePane: FC<Props> = ({
   getFilterTitle,
   onChange,
-  onEdit,
+  onAdd,
   onRemove,
-  onRearrage,
+  onRearrange,
   restoreFilter,
   currentFilterId,
-  filterGroups,
+  filters,
   removedFilters,
   erroredFilters,
 }) => {
   const theme = useTheme();
+
+  const filtersContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleOnAdd = (type: NativeFilterType) => {
+    onAdd(type);
+    setTimeout(() => {
+      const element = document.getElementById('native-filters-tabs');
+      if (element) {
+        const navList = element.getElementsByClassName('ant-tabs-nav-list')[0];
+        navList.scrollTop = navList.scrollHeight;
+      }
+
+      filtersContainerRef?.current?.scroll?.({
+        top: filtersContainerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }, 0);
+  };
   return (
     <TabsContainer>
-      <StyledHeader>Filters</StyledHeader>
       <div
         css={{
           height: '100%',
           overflowY: 'auto',
-          marginLeft: theme.gridUnit * 3,
         }}
       >
         <FilterTitleContainer
-          filterGroups={filterGroups}
+          ref={filtersContainerRef}
+          filters={filters}
           currentFilterId={currentFilterId}
           removedFilters={removedFilters}
           getFilterTitle={getFilterTitle}
           erroredFilters={erroredFilters}
           onChange={onChange}
           onRemove={onRemove}
-          onRearrage={onRearrage}
+          onRearrange={onRearrange}
           restoreFilter={restoreFilter}
         />
       </div>
-      <StyledAddFilterBox
-        onClick={() => {
-          onEdit('', 'add');
-          setTimeout(() => {
-            const element = document.getElementById('native-filters-tabs');
-            if (element) {
-              const navList = element.getElementsByClassName(
-                'ant-tabs-nav-list',
-              )[0];
-              navList.scrollTop = navList.scrollHeight;
-            }
-          }, 0);
+      <div
+        css={{
+          display: 'flex',
+          justifyContent: 'space-around',
+          alignItems: 'flex-start',
+          paddingTop: theme.gridUnit * 3,
         }}
       >
-        <PlusOutlined />{' '}
-        <span
-          data-test="add-filter-button"
-          aria-label="Add filter"
-          role="button"
+        <Button
+          buttonSize="default"
+          buttonStyle="secondary"
+          icon={<Icons.Filter iconSize="m" />}
+          data-test="add-new-filter-button"
+          onClick={() => handleOnAdd(NativeFilterType.NativeFilter)}
         >
-          {t('Add filter')}
-        </span>
-      </StyledAddFilterBox>
+          {t('Add Filter')}
+        </Button>
+        <Button
+          buttonSize="default"
+          buttonStyle="secondary"
+          icon={<Icons.PicCenterOutlined iconSize="m" />}
+          data-test="add-new-divider-button"
+          onClick={() => handleOnAdd(NativeFilterType.Divider)}
+        >
+          {t('Add Divider')}
+        </Button>
+      </div>
     </TabsContainer>
   );
 };

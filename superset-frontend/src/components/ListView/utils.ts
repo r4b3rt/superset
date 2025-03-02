@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, ReactNode } from 'react';
 import {
   useFilters,
   usePagination,
@@ -35,21 +35,28 @@ import {
 
 import rison from 'rison';
 import { isEqual } from 'lodash';
-import { PartialStylesConfig } from 'src/components/Select';
 import {
   FetchDataConfig,
   Filter,
   FilterValue,
+  InnerFilterValue,
   InternalFilter,
   SortColumn,
   ViewModeType,
 } from './types';
 
 // Define custom RisonParam for proper encoding/decoding; note that
-// plus symbols should be encoded to avoid being converted into a space
+// %, &, +, and # must be encoded to avoid breaking the url
 const RisonParam: QueryParamConfig<string, any> = {
   encode: (data?: any | null) =>
-    data === undefined ? undefined : rison.encode(data).replace(/\+/g, '%2B'),
+    data === undefined
+      ? undefined
+      : rison
+          .encode(data)
+          .replace(/%/g, '%25')
+          .replace(/&/g, '%26')
+          .replace(/\+/g, '%2B')
+          .replace(/#/g, '%23'),
   decode: (dataStr?: string | string[]) =>
     dataStr === undefined || Array.isArray(dataStr)
       ? undefined
@@ -132,7 +139,7 @@ export function convertFiltersRison(
   list: Filter[],
 ): FilterValue[] {
   const filters: FilterValue[] = [];
-  const refs = {};
+  const refs: Record<string, FilterValue> = {};
 
   Object.keys(filterObj).forEach(id => {
     const filter: FilterValue = {
@@ -181,8 +188,8 @@ interface UseListViewConfig {
   initialFilters?: Filter[];
   bulkSelectColumnConfig?: {
     id: string;
-    Header: (conf: any) => React.ReactNode;
-    Cell: (conf: any) => React.ReactNode;
+    Header: (conf: any) => ReactNode;
+    Cell: (conf: any) => ReactNode;
   };
   renderCard?: boolean;
   defaultViewMode?: ViewModeType;
@@ -214,7 +221,7 @@ export function useListViewState({
       query.sortColumn && query.sortOrder
         ? [{ id: query.sortColumn, desc: query.sortOrder === 'desc' }]
         : initialSort,
-    [query.sortColumn, query.sortOrder],
+    [initialSort, query.sortColumn, query.sortOrder],
   );
 
   const initialState = {
@@ -232,7 +239,7 @@ export function useListViewState({
   );
 
   const columnsWithSelect = useMemo(() => {
-    // add exact filter type so filters with falsey values are not filtered out
+    // add exact filter type so filters with falsy values are not filtered out
     const columnsWithFilter = columns.map(f => ({ ...f, filter: 'exact' }));
     return bulkSelectMode
       ? [bulkSelectColumnConfig, ...columnsWithFilter]
@@ -250,6 +257,7 @@ export function useListViewState({
     pageCount,
     gotoPage,
     setAllFilters,
+    setSortBy,
     selectedFlatRows,
     toggleAllRowsSelected,
     state: { pageIndex, pageSize, sortBy, filters },
@@ -293,7 +301,7 @@ export function useListViewState({
 
   useEffect(() => {
     // From internalFilters, produce a simplified obj
-    const filterObj = {};
+    const filterObj: Record<string, InnerFilterValue> = {};
 
     internalFilters.forEach(filter => {
       if (
@@ -337,7 +345,7 @@ export function useListViewState({
 
   const applyFilterValue = (index: number, value: any) => {
     setInternalFilters(currentInternalFilters => {
-      // skip redunundant updates
+      // skip redundant updates
       if (currentInternalFilters[index].value === value) {
         return currentInternalFilters;
       }
@@ -367,27 +375,11 @@ export function useListViewState({
     rows,
     selectedFlatRows,
     setAllFilters,
+    setSortBy,
     state: { pageIndex, pageSize, sortBy, filters, internalFilters, viewMode },
     toggleAllRowsSelected,
     applyFilterValue,
     setViewMode,
+    query,
   };
 }
-
-export const filterSelectStyles: PartialStylesConfig = {
-  container: (provider, { getValue }) => ({
-    ...provider,
-    // dynamic width based on label string length
-    minWidth: `${Math.min(
-      12,
-      Math.max(5, 3 + getValue()[0].label.length / 2),
-    )}em`,
-  }),
-  control: provider => ({
-    ...provider,
-    borderWidth: 0,
-    boxShadow: 'none',
-    cursor: 'pointer',
-    backgroundColor: 'transparent',
-  }),
-};

@@ -1,3 +1,4 @@
+/* eslint-env node */
 /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -17,32 +18,30 @@
  * under the License.
  */
 module.exports = {
-  parser: 'babel-eslint',
-  rules: {
-    strict: 0,
-    'react/jsx-filename-extension': [
-      2,
-      { extensions: ['.js', '.jsx', '.ts', '.tsx'] },
-    ],
-    'import/extensions': 'off',
-    'react/jsx-props-no-spreading': 'off',
-    'jsx-a11y/click-events-have-key-events': 'off',
-    'jsx-a11y/iframe-has-title': 'off',
-    'jsx-a11y/interactive-supports-focus': 'off',
-    'react-hooks/rules-of-hooks': 'off',
-    'jsx-a11y/no-noninteractive-element-interactions': 'off',
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended',
+    'plugin:react/recommended',
+    'plugin:prettier/recommended',
+  ],
+  parser: '@typescript-eslint/parser',
+  parserOptions: {
+    ecmaFeatures: {
+      jsx: true,
+    },
+    ecmaVersion: 2020,
+    sourceType: 'module',
   },
-  extends: ['airbnb', 'airbnb/hooks'],
-  env: {
-    browser: true,
-    node: true,
-    jasmine: true,
+  plugins: ['@typescript-eslint', 'react', 'prettier'],
+  rules: {
+    'react/react-in-jsx-scope': 'off',
+    'react/prop-types': 'off',
+    '@typescript-eslint/explicit-module-boundary-types': 'off',
   },
   settings: {
-    'import/resolver': {
-      node: {
-        extensions: ['.js', '.jsx', '.ts', '.tsx'],
-      },
+    react: {
+      version: 'detect',
     },
   },
+  ignorePatterns: ['build/**/*', '.docusaurus/**/*', 'node_modules/**/*'],
 };

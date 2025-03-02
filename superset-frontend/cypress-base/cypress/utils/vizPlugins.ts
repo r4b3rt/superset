@@ -40,6 +40,8 @@ const V1_PLUGINS = [
   'word_cloud',
   'pie',
   'table',
+  'big_number',
+  'big_number_total',
 ];
 export const DASHBOARD_CHART_ALIAS_PREFIX = 'getChartData_';
 
@@ -47,6 +49,7 @@ export function isLegacyChart(vizType: string): boolean {
   return !V1_PLUGINS.includes(vizType);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isLegacyResponse(response: any): boolean {
   return !response.result;
 }

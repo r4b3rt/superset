@@ -18,7 +18,6 @@
  */
 
 import { useCallback, useEffect } from 'react';
-import { omit } from 'lodash';
 /* eslint camelcase: 0 */
 import URI from 'urijs';
 import {
@@ -26,21 +25,22 @@ import {
   ensureIsArray,
   getChartBuildQueryRegistry,
   getChartMetadataRegistry,
+  SupersetClient,
 } from '@superset-ui/core';
 import { availableDomains } from 'src/utils/hostNamesConfig';
 import { safeStringify } from 'src/utils/safeStringify';
+import { optionLabel } from 'src/utils/common';
 import { URL_PARAMS } from 'src/constants';
 import {
   MULTI_OPERATORS,
   OPERATOR_ENUM_TO_OPERATOR_TYPE,
+  UNSAVED_CHART_ID,
 } from 'src/explore/constants';
 import { DashboardStandaloneMode } from 'src/dashboard/util/constants';
 
-const MAX_URL_LENGTH = 8000;
-
 export function getChartKey(explore) {
-  const { slice } = explore;
-  return slice ? slice.slice_id : 0;
+  const { slice, form_data } = explore;
+  return slice?.slice_id ?? form_data?.slice_id ?? UNSAVED_CHART_ID;
 }
 
 let requestCounter = 0;
@@ -61,18 +61,16 @@ export function getHostName(allowDomainSharding = false) {
   return availableDomains[currentIndex];
 }
 
-export function getAnnotationJsonUrl(slice_id, form_data, isNative, force) {
+export function getAnnotationJsonUrl(slice_id, force) {
   if (slice_id === null || slice_id === undefined) {
     return null;
   }
+
   const uri = URI(window.location.search);
-  const endpoint = isNative ? 'annotation_json' : 'slice_json';
   return uri
-    .pathname(`/superset/${endpoint}/${slice_id}`)
+    .pathname('/api/v1/chart/data')
     .search({
-      form_data: safeStringify(form_data, (key, value) =>
-        value === null ? undefined : value,
-      ),
+      form_data: safeStringify({ slice_id }),
       force,
     })
     .toString();
@@ -87,57 +85,23 @@ export function getURIDirectory(endpointType = 'base') {
   ) {
     return '/superset/explore_json/';
   }
-  return '/superset/explore/';
+  return '/explore/';
 }
 
-/**
- * This gets the url of the explore page, with all the form data included explicitly.
- * This includes any form data overrides from the dashboard.
- */
-export function getExploreLongUrl(
-  formData,
-  endpointType,
-  allowOverflow = true,
-  extraSearch = {},
-) {
-  if (!formData.datasource) {
-    return null;
-  }
-
+export function mountExploreUrl(endpointType, extraSearch = {}, force = false) {
   const uri = new URI('/');
   const directory = getURIDirectory(endpointType);
   const search = uri.search(true);
   Object.keys(extraSearch).forEach(key => {
     search[key] = extraSearch[key];
   });
-  search.form_data = safeStringify(formData);
   if (endpointType === URL_PARAMS.standalone.name) {
-    search.standalone = DashboardStandaloneMode.HIDE_NAV;
+    if (force) {
+      search.force = '1';
+    }
+    search.standalone = DashboardStandaloneMode.HideNav;
   }
-  const url = uri.directory(directory).search(search).toString();
-  if (!allowOverflow && url.length > MAX_URL_LENGTH) {
-    const minimalFormData = {
-      datasource: formData.datasource,
-      viz_type: formData.viz_type,
-    };
-    return getExploreLongUrl(minimalFormData, endpointType, false, {
-      URL_IS_TOO_LONG_TO_SHARE: null,
-    });
-  }
-  return url;
-}
-
-export function getExploreUrlFromDashboard(formData) {
-  // remove formData params that we don't need in the explore url.
-  // These are present when generating explore urls from the dashboard page.
-  // This should be superseded by some sort of "exploration context" system
-  // where form data and other context is referenced by id.
-  const trimmedFormData = omit(formData, [
-    'dataMask',
-    'url_params',
-    'label_colors',
-  ]);
-  return getExploreLongUrl(trimmedFormData, null, false);
+  return uri.directory(directory).search(search).toString();
 }
 
 export function getChartDataUri({ path, qs, allowDomainSharding = false }) {
@@ -230,9 +194,12 @@ export function getExploreUrl({
   return uri.search(search).directory(directory).toString();
 }
 
-export const shouldUseLegacyApi = formData => {
+export const getQuerySettings = formData => {
   const vizMetadata = getChartMetadataRegistry().get(formData.viz_type);
-  return vizMetadata ? vizMetadata.useLegacyApi : false;
+  return [
+    vizMetadata?.useLegacyApi ?? false,
+    vizMetadata?.parseMethod ?? 'json-bigint',
+  ];
 };
 
 export const buildV1ChartDataPayload = ({
@@ -270,31 +237,6 @@ export const buildV1ChartDataPayload = ({
 export const getLegacyEndpointType = ({ resultType, resultFormat }) =>
   resultFormat === 'csv' ? resultFormat : resultType;
 
-export function postForm(url, payload, target = '_blank') {
-  if (!url) {
-    return;
-  }
-
-  const hiddenForm = document.createElement('form');
-  hiddenForm.action = url;
-  hiddenForm.method = 'POST';
-  hiddenForm.target = target;
-  const token = document.createElement('input');
-  token.type = 'hidden';
-  token.name = 'csrf_token';
-  token.value = (document.getElementById('csrf_token') || {}).value;
-  hiddenForm.appendChild(token);
-  const data = document.createElement('input');
-  data.type = 'hidden';
-  data.name = 'form_data';
-  data.value = safeStringify(payload);
-  hiddenForm.appendChild(data);
-
-  document.body.appendChild(hiddenForm);
-  hiddenForm.submit();
-  document.body.removeChild(hiddenForm);
-}
-
 export const exportChart = ({
   formData,
   resultFormat = 'json',
@@ -304,7 +246,8 @@ export const exportChart = ({
 }) => {
   let url;
   let payload;
-  if (shouldUseLegacyApi(formData)) {
+  const [useLegacyApi, parseMethod] = getQuerySettings(formData);
+  if (useLegacyApi) {
     const endpointType = getLegacyEndpointType({ resultFormat, resultType });
     url = getExploreUrl({
       formData,
@@ -320,18 +263,21 @@ export const exportChart = ({
       resultFormat,
       resultType,
       ownState,
+      parseMethod,
     });
   }
-  postForm(url, payload);
+
+  SupersetClient.postForm(url, { form_data: safeStringify(payload) });
 };
 
-export const exploreChart = formData => {
+export const exploreChart = (formData, requestParams) => {
   const url = getExploreUrl({
     formData,
     endpointType: 'base',
     allowDomainSharding: false,
+    requestParams,
   });
-  postForm(url, formData);
+  SupersetClient.postForm(url, { form_data: safeStringify(formData) });
 };
 
 export const useDebouncedEffect = (effect, delay, deps) => {
@@ -354,7 +300,11 @@ export const getSimpleSQLExpression = (subject, operator, comparator) => {
     [...MULTI_OPERATORS]
       .map(op => OPERATOR_ENUM_TO_OPERATOR_TYPE[op].operation)
       .indexOf(operator) >= 0;
-  let expression = subject ?? '';
+  // If returned value is an object after changing dataset
+  let expression =
+    typeof subject === 'object'
+      ? (subject?.column_name ?? '')
+      : (subject ?? '');
   if (subject && operator) {
     expression += ` ${operator}`;
     const firstValue =
@@ -364,13 +314,19 @@ export const getSimpleSQLExpression = (subject, operator, comparator) => {
       firstValue !== undefined && Number.isNaN(Number(firstValue));
     const quote = isString ? "'" : '';
     const [prefix, suffix] = isMulti ? ['(', ')'] : ['', ''];
-    const formattedComparators = comparatorArray.map(
-      val =>
-        `${quote}${isString ? String(val).replace("'", "''") : val}${quote}`,
-    );
+    const formattedComparators = comparatorArray
+      .map(val => optionLabel(val))
+      .map(
+        val =>
+          `${quote}${isString ? String(val).replace(/'/g, "''") : val}${quote}`,
+      );
     if (comparatorArray.length > 0) {
       expression += ` ${prefix}${formattedComparators.join(', ')}${suffix}`;
     }
   }
   return expression;
 };
+
+export function formatSelectOptions(options) {
+  return options.map(opt => [opt, opt.toString()]);
+}

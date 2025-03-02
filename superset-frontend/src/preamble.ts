@@ -18,49 +18,78 @@
  */
 import { setConfig as setHotLoaderConfig } from 'react-hot-loader';
 import 'abortcontroller-polyfill/dist/abortcontroller-polyfill-only';
-import moment from 'moment';
+import dayjs from 'dayjs';
 // eslint-disable-next-line no-restricted-imports
-import { configure, supersetTheme } from '@superset-ui/core';
+import {
+  configure,
+  makeApi,
+  supersetTheme,
+  initFeatureFlags,
+} from '@superset-ui/core';
 import { merge } from 'lodash';
 import setupClient from './setup/setupClient';
 import setupColors from './setup/setupColors';
 import setupFormatters from './setup/setupFormatters';
+import setupDashboardComponents from './setup/setupDashboardComponents';
+import { User } from './types/bootstrapTypes';
+import getBootstrapData from './utils/getBootstrapData';
 
 if (process.env.WEBPACK_MODE === 'development') {
   setHotLoaderConfig({ logLevel: 'debug', trackTailUpdates: false });
 }
 
-let bootstrapData: any;
+// eslint-disable-next-line import/no-mutable-exports
+const bootstrapData = getBootstrapData();
+
 // Configure translation
 if (typeof window !== 'undefined') {
-  const root = document.getElementById('app');
-
-  bootstrapData = root
-    ? JSON.parse(root.getAttribute('data-bootstrap') || '{}')
-    : {};
-  if (bootstrapData.common && bootstrapData.common.language_pack) {
-    const languagePack = bootstrapData.common.language_pack;
-    configure({ languagePack });
-    moment.locale(bootstrapData.common.locale);
-  } else {
-    configure();
-  }
+  configure({ languagePack: bootstrapData.common.language_pack });
+  dayjs.locale(bootstrapData.common.locale);
 } else {
   configure();
 }
+
+// Configure feature flags
+initFeatureFlags(bootstrapData.common.feature_flags);
 
 // Setup SupersetClient
 setupClient();
 
 setupColors(
-  bootstrapData?.common?.extra_categorical_color_schemes,
-  bootstrapData?.common?.extra_sequential_color_schemes,
+  bootstrapData.common.extra_categorical_color_schemes,
+  bootstrapData.common.extra_sequential_color_schemes,
 );
 
 // Setup number formatters
-setupFormatters();
+setupFormatters(
+  bootstrapData.common.d3_format,
+  bootstrapData.common.d3_time_format,
+);
+
+setupDashboardComponents();
 
 export const theme = merge(
   supersetTheme,
-  bootstrapData?.common?.theme_overrides ?? {},
+  bootstrapData.common.theme_overrides ?? {},
 );
+
+const getMe = makeApi<void, User>({
+  method: 'GET',
+  endpoint: '/api/v1/me/',
+});
+
+/**
+ * When you re-open the window, we check if you are still logged in.
+ * If your session expired or you signed out, we'll redirect to login.
+ * If you aren't logged in in the first place (!isActive), then we shouldn't do this.
+ */
+if (bootstrapData.user?.isActive) {
+  document.addEventListener('visibilitychange', () => {
+    // we only care about the tab becoming visible, not vice versa
+    if (document.visibilityState !== 'visible') return;
+
+    getMe().catch(() => {
+      // ignore error, SupersetClient will redirect to login on a 401
+    });
+  });
+}

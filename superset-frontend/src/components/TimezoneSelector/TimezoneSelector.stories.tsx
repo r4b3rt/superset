@@ -16,9 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { useArgs } from '@storybook/client-api';
-import TimezoneSelector, { TimezoneProps } from './index';
+import { useArgs } from '@storybook/preview-api';
+import TimezoneSelector, { TimezoneSelectorProps } from './index';
 
 export default {
   title: 'TimezoneSelector',
@@ -26,7 +25,7 @@ export default {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const InteractiveTimezoneSelector = (args: TimezoneProps) => {
+export const InteractiveTimezoneSelector = (args: TimezoneSelectorProps) => {
   const [{ timezone }, updateArgs] = useArgs();
   const onTimezoneChange = (value: string) => {
     updateArgs({ timezone: value });

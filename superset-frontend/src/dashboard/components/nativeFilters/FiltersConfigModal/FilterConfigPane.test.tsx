@@ -16,21 +16,29 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { dashboardLayout } from 'spec/fixtures/mockDashboardLayout';
 import { buildNativeFilter } from 'spec/fixtures/mockNativeFilters';
-import { act, fireEvent, render, screen } from 'spec/helpers/testing-library';
+import {
+  fireEvent,
+  render,
+  screen,
+  userEvent,
+  waitFor,
+} from 'spec/helpers/testing-library';
 import FilterConfigPane from './FilterConfigurePane';
 
+const scrollMock = jest.fn();
+Element.prototype.scroll = scrollMock;
+
 const defaultProps = {
-  children: jest.fn(),
   getFilterTitle: (id: string) => id,
   onChange: jest.fn(),
-  onEdit: jest.fn(),
+  onAdd: jest.fn(),
+  onRemove: jest.fn(),
   onRearrange: jest.fn(),
   restoreFilter: jest.fn(),
   currentFilterId: 'NATIVE_FILTER-1',
-  filterGroups: [['NATIVE_FILTER-2', 'NATIVE_FILTER-1'], ['NATIVE_FILTER-3']],
+  filters: ['NATIVE_FILTER-1', 'NATIVE_FILTER-2', 'NATIVE_FILTER-3'],
   removedFilters: {},
   erroredFilters: [],
 };
@@ -55,21 +63,18 @@ function defaultRender(initialState: any = defaultState, props = defaultProps) {
   });
 }
 
-test('renders form', async () => {
-  await act(async () => {
-    defaultRender();
-  });
-  expect(defaultProps.children).toHaveBeenCalledTimes(3);
+beforeEach(() => {
+  scrollMock.mockClear();
 });
 
 test('drag and drop', async () => {
   defaultRender();
-  // Drag the state and contry filter above the product filter
+  // Drag the state and country filter above the product filter
   const [countryStateFilter, productFilter] = document.querySelectorAll(
     'div[draggable=true]',
   );
   // const productFilter = await screen.findByText('NATIVE_FILTER-3');
-  await act(async () => {
+  await waitFor(() => {
     fireEvent.dragStart(productFilter);
     fireEvent.dragEnter(countryStateFilter);
     fireEvent.dragOver(countryStateFilter);
@@ -84,31 +89,51 @@ test('remove filter', async () => {
   defaultRender();
   // First trash icon
   const removeFilterIcon = document.querySelector("[alt='RemoveFilter']")!;
-  await act(async () => {
-    fireEvent(
-      removeFilterIcon,
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-  });
-  expect(defaultProps.onEdit).toHaveBeenCalledWith('NATIVE_FILTER-2', 'remove');
+  userEvent.click(removeFilterIcon);
+  expect(defaultProps.onRemove).toHaveBeenCalledWith('NATIVE_FILTER-1');
 });
 
 test('add filter', async () => {
   defaultRender();
   // First trash icon
-  const removeFilterIcon = screen.getByText('Add filter')!;
-  await act(async () => {
-    fireEvent(
-      removeFilterIcon,
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-  });
+  const addFilterButton = await screen.findByText('Add Filter');
+  userEvent.click(addFilterButton);
+  expect(defaultProps.onAdd).toHaveBeenCalledWith('NATIVE_FILTER');
+});
 
-  expect(defaultProps.onEdit).toHaveBeenCalledWith('', 'add');
+test('add divider', async () => {
+  defaultRender();
+  const addFilterButton = await screen.findByText('Add Divider');
+  userEvent.click(addFilterButton);
+  expect(defaultProps.onAdd).toHaveBeenCalledWith('DIVIDER');
+});
+
+test('filter container should scroll to bottom when adding items', async () => {
+  const state = {
+    dashboardInfo: {
+      metadata: {
+        native_filter_configuration: new Array(35)
+          .fill(0)
+          .map((_, index) =>
+            buildNativeFilter(`NATIVE_FILTER-${index}`, `filter-${index}`, []),
+          ),
+      },
+    },
+    dashboardLayout,
+  };
+  const props = {
+    ...defaultProps,
+    filters: new Array(35).fill(0).map((_, index) => `NATIVE_FILTER-${index}`),
+  };
+
+  defaultRender(state, props);
+
+  const addFilterButton = await screen.findByText('Add Filter');
+
+  userEvent.click(addFilterButton);
+
+  await waitFor(() => {
+    const containerElement = screen.getByTestId('filter-title-container');
+    expect(containerElement.scroll).toHaveBeenCalled();
+  });
 });

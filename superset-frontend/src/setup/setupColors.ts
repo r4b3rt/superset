@@ -18,9 +18,12 @@
  */
 import {
   CategoricalScheme,
+  ColorScheme,
+  ColorSchemeConfig,
   getCategoricalSchemeRegistry,
   getSequentialSchemeRegistry,
   SequentialScheme,
+  SequentialSchemeConfig,
   CategoricalAirbnb,
   CategoricalD3,
   CategoricalEcharts,
@@ -31,11 +34,18 @@ import {
   SequentialCommon,
   SequentialD3,
   ColorSchemeRegistry,
+  ColorSchemeGroup,
+  CategoricalPresetSuperset,
+  CategoricalModernSunset,
+  CategoricalColorsOfRainbow,
+  CategoricalBlueToGreen,
+  CategoricalRedToYellow,
+  CategoricalWavesOfBlue,
 } from '@superset-ui/core';
 
-function registerColorSchemes(
-  registry: ColorSchemeRegistry<unknown>,
-  colorSchemes: (CategoricalScheme | SequentialScheme)[],
+function registerColorSchemes<T extends ColorScheme>(
+  registry: ColorSchemeRegistry<T>,
+  colorSchemes: T[],
   standardDefaultKey: string,
 ) {
   colorSchemes.forEach(scheme => {
@@ -48,9 +58,16 @@ function registerColorSchemes(
 }
 
 export default function setupColors(
-  extraCategoricalColorSchemes: CategoricalScheme[] = [],
-  extraSequentialColorSchemes: SequentialScheme[] = [],
+  extraCategoricalColorSchemeConfigs: ColorSchemeConfig[] = [],
+  extraSequentialColorSchemeConfigs: SequentialSchemeConfig[] = [],
 ) {
+  const extraCategoricalColorSchemes = extraCategoricalColorSchemeConfigs.map(
+    config =>
+      new CategoricalScheme({ ...config, group: ColorSchemeGroup.Custom }),
+  );
+  const extraSequentialColorSchemes = extraSequentialColorSchemeConfigs.map(
+    config => new SequentialScheme(config),
+  );
   registerColorSchemes(
     // @ts-ignore
     getCategoricalSchemeRegistry(),
@@ -62,6 +79,12 @@ export default function setupColors(
       ...CategoricalLyft,
       ...CategoricalPreset,
       ...CategoricalSuperset,
+      ...CategoricalPresetSuperset,
+      ...CategoricalModernSunset,
+      ...CategoricalColorsOfRainbow,
+      ...CategoricalBlueToGreen,
+      ...CategoricalRedToYellow,
+      ...CategoricalWavesOfBlue,
       ...extraCategoricalColorSchemes,
     ],
     'supersetColors',

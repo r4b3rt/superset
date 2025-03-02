@@ -16,54 +16,49 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useDispatch } from 'react-redux';
+import type { Table } from 'src/SqlLab/types';
 import Collapse from 'src/components/Collapse';
 import Card from 'src/components/Card';
 import ButtonGroup from 'src/components/ButtonGroup';
-import { t, styled } from '@superset-ui/core';
+import { css, t, styled, useTheme } from '@superset-ui/core';
 import { debounce } from 'lodash';
 
+import {
+  removeDataPreview,
+  removeTables,
+  addDangerToast,
+  syncTable,
+} from 'src/SqlLab/actions/sqlLab';
+import {
+  tableApiUtil,
+  useTableExtendedMetadataQuery,
+  useTableMetadataQuery,
+} from 'src/hooks/apiResources';
 import { Tooltip } from 'src/components/Tooltip';
 import CopyToClipboard from 'src/components/CopyToClipboard';
 import { IconTooltip } from 'src/components/IconTooltip';
 import ModalTrigger from 'src/components/ModalTrigger';
 import Loading from 'src/components/Loading';
+import useEffectEvent from 'src/hooks/useEffectEvent';
+import { ActionType } from 'src/types/Action';
 import ColumnElement, { ColumnKeyTypeType } from '../ColumnElement';
 import ShowSQL from '../ShowSQL';
 
-interface Column {
+export interface Column {
   name: string;
   keys?: { type: ColumnKeyTypeType }[];
   type: string;
 }
 
-interface Table {
-  id: string;
-  name: string;
-  partitions?: {
-    partitionQuery: string;
-    latest: object[];
-  };
-  metadata?: Record<string, string>;
-  indexes?: object[];
-  selectStar?: string;
-  view?: string;
-  isMetadataLoading: boolean;
-  isExtraMetadataLoading: boolean;
-  columns: Column[];
-}
-
-interface TableElementProps {
+export interface TableElementProps {
   table: Table;
-  actions: {
-    removeDataPreview: (table: Table) => void;
-    removeTable: (table: Table) => void;
-  };
 }
 
 const StyledSpan = styled.span`
   color: ${({ theme }) => theme.colors.primary.dark1};
-  &: hover {
+  &:hover {
     color: ${({ theme }) => theme.colors.primary.dark2};
   }
   cursor: pointer;
@@ -74,31 +69,131 @@ const Fade = styled.div`
   opacity: ${(props: { hovered: boolean }) => (props.hovered ? 1 : 0)};
 `;
 
-const TableElement = ({ table, actions, ...props }: TableElementProps) => {
+const StyledCollapsePanel = styled(Collapse.Panel)`
+  ${({ theme }) => css`
+    & {
+      .ws-el-controls {
+        margin-right: ${-theme.gridUnit}px;
+        display: flex;
+      }
+
+      .header-container {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        width: 100%;
+
+        .table-name {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-size: ${theme.typography.sizes.l}px;
+          flex: 1;
+        }
+
+        .header-right-side {
+          margin-left: auto;
+          display: flex;
+          align-items: center;
+          margin-right: ${theme.gridUnit * 8}px;
+        }
+      }
+    }
+  `}
+`;
+
+const TableElement = ({ table, ...props }: TableElementProps) => {
+  const { dbId, catalog, schema, name, expanded } = table;
+  const theme = useTheme();
+  const dispatch = useDispatch();
+  const {
+    currentData: tableMetadata,
+    isSuccess: isMetadataSuccess,
+    isFetching: isMetadataFetching,
+    isError: hasMetadataError,
+  } = useTableMetadataQuery(
+    {
+      dbId,
+      catalog,
+      schema,
+      table: name,
+    },
+    { skip: !expanded },
+  );
+  const {
+    currentData: tableExtendedMetadata,
+    isSuccess: isExtraMetadataSuccess,
+    isLoading: isExtraMetadataLoading,
+    isError: hasExtendedMetadataError,
+  } = useTableExtendedMetadataQuery(
+    {
+      dbId,
+      catalog,
+      schema,
+      table: name,
+    },
+    { skip: !expanded },
+  );
+
+  useEffect(() => {
+    if (hasMetadataError || hasExtendedMetadataError) {
+      dispatch(
+        addDangerToast(t('An error occurred while fetching table metadata')),
+      );
+    }
+  }, [hasMetadataError, hasExtendedMetadataError, dispatch]);
+
+  const tableData = {
+    ...tableMetadata,
+    ...tableExtendedMetadata,
+  };
+
+  // TODO: migrate syncTable logic by SIP-93
+  const syncTableMetadata = useEffectEvent(() => {
+    const { initialized } = table;
+    if (!initialized) {
+      dispatch(syncTable(table, tableData));
+    }
+  });
+
+  useEffect(() => {
+    if (isMetadataSuccess && isExtraMetadataSuccess) {
+      syncTableMetadata();
+    }
+  }, [isMetadataSuccess, isExtraMetadataSuccess, syncTableMetadata]);
+
   const [sortColumns, setSortColumns] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const tableNameRef = useRef<HTMLInputElement>(null);
 
   const setHover = (hovered: boolean) => {
     debounce(() => setHovered(hovered), 100)();
   };
 
   const removeTable = () => {
-    actions.removeDataPreview(table);
-    actions.removeTable(table);
+    dispatch(removeDataPreview(table));
+    dispatch(removeTables([table]));
   };
 
   const toggleSortColumns = () => {
     setSortColumns(prevState => !prevState);
   };
 
+  const refreshTableMetadata = () => {
+    dispatch(
+      tableApiUtil.invalidateTags([{ type: 'TableMetadatas', id: name }]),
+    );
+    dispatch(syncTable(table, tableData));
+  };
+
   const renderWell = () => {
     let partitions;
     let metadata;
-    if (table.partitions) {
+    if (tableData.partitions) {
       let partitionQuery;
       let partitionClipBoard;
-      if (table.partitions.partitionQuery) {
-        ({ partitionQuery } = table.partitions);
+      if (tableData.partitions.partitionQuery) {
+        ({ partitionQuery } = tableData.partitions);
         const tt = t('Copy partition query to clipboard');
         partitionClipBoard = (
           <CopyToClipboard
@@ -109,7 +204,7 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
           />
         );
       }
-      const latest = Object.entries(table.partitions?.latest || [])
+      const latest = Object.entries(tableData.partitions?.latest || [])
         .map(([key, value]) => `${key}=${value}`)
         .join('/');
 
@@ -123,18 +218,22 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
       );
     }
 
-    if (table.metadata) {
-      metadata = Object.entries(table.metadata).map(([key, value]) => (
+    if (tableData.metadata) {
+      metadata = Object.entries(tableData.metadata).map(([key, value]) => (
         <div>
           <small>
             <strong>{key}:</strong> {value}
           </small>
         </div>
       ));
+      if (!metadata?.length) {
+        // hide metadata card view
+        return null;
+      }
     }
 
-    if (!partitions && (!metadata || !metadata.length)) {
-      // hide partition and metadata card view
+    if (!partitions) {
+      // hide partition card view
       return null;
     }
 
@@ -148,28 +247,40 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
 
   const renderControls = () => {
     let keyLink;
-    if (table?.indexes?.length) {
+    const KEYS_FOR_TABLE_TEXT = t('Keys for table');
+    if (tableData?.indexes?.length) {
       keyLink = (
         <ModalTrigger
-          modalTitle={
-            <div>
-              {t('Keys for table')} <strong>{table.name}</strong>
-            </div>
-          }
-          modalBody={table.indexes.map((ix, i) => (
+          modalTitle={`${KEYS_FOR_TABLE_TEXT} ${name}`}
+          modalBody={tableData.indexes.map((ix, i) => (
             <pre key={i}>{JSON.stringify(ix, null, '  ')}</pre>
           ))}
           triggerNode={
             <IconTooltip
               className="fa fa-key pull-left m-l-2"
-              tooltip={t('View keys & indexes (%s)', table.indexes.length)}
+              tooltip={t('View keys & indexes (%s)', tableData.indexes.length)}
             />
           }
         />
       );
     }
     return (
-      <ButtonGroup className="ws-el-controls">
+      <ButtonGroup
+        css={css`
+          column-gap: ${theme.gridUnit * 1.5}px;
+          margin-right: ${theme.gridUnit}px;
+          & span {
+            display: flex;
+            justify-content: center;
+            width: ${theme.gridUnit * 4}px;
+          }
+        `}
+      >
+        <IconTooltip
+          className="fa fa-refresh pull-left m-l-2 pointer"
+          onClick={refreshTableMetadata}
+          tooltip={t('Refresh table schema')}
+        />
         {keyLink}
         <IconTooltip
           className={
@@ -183,7 +294,7 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
               : t('Sort columns alphabetically')
           }
         />
-        {table.selectStar && (
+        {tableData.selectStar && (
           <CopyToClipboard
             copyNode={
               <IconTooltip
@@ -193,13 +304,13 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
                 <i aria-hidden className="fa fa-clipboard pull-left m-l-2" />
               </IconTooltip>
             }
-            text={table.selectStar}
+            text={tableData.selectStar}
             shouldShowText={false}
           />
         )}
-        {table.view && (
+        {tableData.view && (
           <ShowSQL
-            sql={table.view}
+            sql={tableData.view}
             tooltipText={t('Show CREATE VIEW statement')}
             title={t('CREATE VIEW statement')}
           />
@@ -213,44 +324,56 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
     );
   };
 
-  const renderHeader = () => (
-    <div
-      className="clearfix header-container"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <Tooltip
-        id="copy-to-clipboard-tooltip"
-        placement="topLeft"
-        style={{ cursor: 'pointer' }}
-        title={table.name}
-        trigger={['hover']}
-      >
-        <StyledSpan data-test="collapse" className="table-name">
-          <strong>{table.name}</strong>
-        </StyledSpan>
-      </Tooltip>
+  const renderHeader = () => {
+    const element: HTMLInputElement | null = tableNameRef.current;
+    let trigger = [] as ActionType[];
+    if (element && element.offsetWidth < element.scrollWidth) {
+      trigger = ['hover'];
+    }
 
-      <div className="pull-right header-right-side">
-        {table.isMetadataLoading || table.isExtraMetadataLoading ? (
-          <Loading position="inline" />
-        ) : (
-          <Fade
-            data-test="fade"
-            hovered={hovered}
-            onClick={e => e.stopPropagation()}
+    return (
+      <div
+        data-test="table-element-header-container"
+        className="clearfix header-container"
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        <Tooltip
+          id="copy-to-clipboard-tooltip"
+          style={{ cursor: 'pointer' }}
+          title={name}
+          trigger={trigger}
+        >
+          <StyledSpan
+            data-test="collapse"
+            ref={tableNameRef}
+            className="table-name"
           >
-            {renderControls()}
-          </Fade>
-        )}
+            <strong>{name}</strong>
+          </StyledSpan>
+        </Tooltip>
+
+        <div className="pull-right header-right-side">
+          {isMetadataFetching || isExtraMetadataLoading ? (
+            <Loading position="inline" />
+          ) : (
+            <Fade
+              data-test="fade"
+              hovered={hovered}
+              onClick={e => e.stopPropagation()}
+            >
+              {renderControls()}
+            </Fade>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderBody = () => {
     let cols;
-    if (table.columns) {
-      cols = table.columns.slice();
+    if (tableData.columns) {
+      cols = tableData.columns.slice();
       if (sortColumns) {
         cols.sort((a: Column, b: Column) => {
           const colA = a.name.toUpperCase();
@@ -262,15 +385,14 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
 
     const metadata = (
       <div
+        data-test="table-element"
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         css={{ paddingTop: 6 }}
       >
         {renderWell()}
         <div>
-          {cols?.map(col => (
-            <ColumnElement column={col} key={col.name} />
-          ))}
+          {cols?.map(col => <ColumnElement column={col} key={col.name} />)}
         </div>
       </div>
     );
@@ -278,7 +400,7 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
   };
 
   return (
-    <Collapse.Panel
+    <StyledCollapsePanel
       {...props}
       key={table.id}
       header={renderHeader()}
@@ -286,7 +408,7 @@ const TableElement = ({ table, actions, ...props }: TableElementProps) => {
       forceRender
     >
       {renderBody()}
-    </Collapse.Panel>
+    </StyledCollapsePanel>
   );
 };
 

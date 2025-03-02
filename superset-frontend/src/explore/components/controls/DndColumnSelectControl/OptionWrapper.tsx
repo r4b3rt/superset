@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import {
   useDrag,
   useDrop,
@@ -30,7 +30,7 @@ import {
 } from 'src/explore/components/controls/DndColumnSelectControl/types';
 import { Tooltip } from 'src/components/Tooltip';
 import { StyledColumnOption } from 'src/explore/components/optionRenderers';
-import { styled } from '@superset-ui/core';
+import { styled, isAdhocColumn } from '@superset-ui/core';
 import { ColumnMeta } from '@superset-ui/chart-controls';
 import Option from './Option';
 
@@ -57,7 +57,9 @@ export default function OptionWrapper(
     clickClose,
     withCaret,
     isExtra,
+    datasourceWarningMessage,
     canDelete = true,
+    tooltipOverlay,
     ...rest
   } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -122,11 +124,19 @@ export default function OptionWrapper(
     (!isDragging &&
       labelRef &&
       labelRef.current &&
-      labelRef.current.scrollWidth > labelRef.current.clientWidth);
+      labelRef.current.scrollWidth > labelRef.current.clientWidth) ||
+    (!isDragging && tooltipOverlay);
 
   const LabelContent = () => {
     if (!shouldShowTooltip) {
       return <span>{label}</span>;
+    }
+    if (tooltipOverlay) {
+      return (
+        <Tooltip overlay={tooltipOverlay}>
+          <span>{label}</span>
+        </Tooltip>
+      );
     }
     return (
       <Tooltip title={tooltipTitle || label}>
@@ -135,14 +145,19 @@ export default function OptionWrapper(
     );
   };
 
-  const ColumnOption = () => (
-    <StyledColumnOption
-      column={column as ColumnMeta}
-      labelRef={labelRef}
-      showTooltip={!!shouldShowTooltip}
-      showType
-    />
-  );
+  const ColumnOption = () => {
+    const transformedCol =
+      column && isAdhocColumn(column)
+        ? { verbose_name: column.label, expression: column.sqlExpression }
+        : column;
+    return (
+      <StyledColumnOption
+        column={transformedCol as ColumnMeta}
+        labelRef={labelRef}
+        showType
+      />
+    );
+  };
 
   const Label = () => {
     if (label) {
@@ -171,6 +186,7 @@ export default function OptionWrapper(
         clickClose={clickClose}
         withCaret={withCaret}
         isExtra={isExtra}
+        datasourceWarningMessage={datasourceWarningMessage}
         canDelete={canDelete}
       >
         <Label />

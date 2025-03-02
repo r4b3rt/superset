@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { useTheme } from '@superset-ui/core';
 import Button from 'src/components/Button';
 import Icons from 'src/components/Icons';
@@ -49,20 +48,14 @@ InteractiveCopyToClipboard.args = {
   text: 'http://superset.apache.org/',
   wrapped: true,
   tooltipText: 'Copy to clipboard',
+  hideTooltip: false,
 };
 
 InteractiveCopyToClipboard.argTypes = {
   onCopyEnd: { action: 'onCopyEnd' },
   copyNode: {
     defaultValue: 'Button',
-    control: { type: 'radio', options: ['Button', 'Icon', 'Text'] },
-  },
-};
-
-InteractiveCopyToClipboard.story = {
-  parameters: {
-    knobs: {
-      disable: true,
-    },
+    control: { type: 'radio' },
+    options: ['Button', 'Icon', 'Text'],
   },
 };

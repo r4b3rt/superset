@@ -16,20 +16,22 @@
 # under the License.
 
 import importlib
-import json
 import logging
 from pathlib import Path
 from unittest import mock
 from zipfile import is_zipfile, ZipFile
 
 import pytest
-import yaml
+import yaml  # noqa: F401
 from freezegun import freeze_time
 
-import superset.cli
-from superset import app
+import superset.cli.importexport
+import superset.cli.thumbnails
+from superset import app, db
+from superset.models.dashboard import Dashboard
 from tests.integration_tests.fixtures.birth_names_dashboard import (
-    load_birth_names_dashboard_with_slices,
+    load_birth_names_dashboard_with_slices,  # noqa: F401
+    load_birth_names_data,  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
@@ -47,73 +49,20 @@ def assert_cli_fails_properly(response, caplog):
 
 
 @pytest.mark.usefixtures("load_birth_names_dashboard_with_slices")
-def test_export_dashboards_original(app_context, fs):
-    """
-    Test that a JSON file is exported.
-    """
-    # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
-
-    # reload to define export_dashboards correctly based on the
-    # feature flags
-    importlib.reload(superset.cli)
-
-    runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.export_dashboards, ("-f", "dashboards.json"))
-
-    assert response.exit_code == 0
-    assert Path("dashboards.json").exists()
-
-    # check that file is valid JSON
-    with open("dashboards.json") as fp:
-        contents = fp.read()
-    json.loads(contents)
-
-
-@pytest.mark.usefixtures("load_birth_names_dashboard_with_slices")
-def test_export_datasources_original(app_context, fs):
-    """
-    Test that a YAML file is exported.
-    """
-    # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
-
-    # reload to define export_dashboards correctly based on the
-    # feature flags
-    importlib.reload(superset.cli)
-
-    runner = app.test_cli_runner()
-    response = runner.invoke(
-        superset.cli.export_datasources, ("-f", "datasources.yaml")
-    )
-
-    assert response.exit_code == 0
-    assert Path("datasources.yaml").exists()
-
-    # check that file is valid JSON
-    with open("datasources.yaml") as fp:
-        contents = fp.read()
-    yaml.safe_load(contents)
-
-
-@pytest.mark.usefixtures("load_birth_names_dashboard_with_slices")
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
 def test_export_dashboards_versioned_export(app_context, fs):
     """
     Test that a ZIP file is exported.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_dashboards correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     runner = app.test_cli_runner()
     with freeze_time("2021-01-01T00:00:00Z"):
-        response = runner.invoke(superset.cli.export_dashboards, ())
+        response = runner.invoke(superset.cli.importexport.export_dashboards, ())
 
     assert response.exit_code == 0
     assert Path("dashboard_export_20210101T000000.zip").exists()
@@ -121,11 +70,8 @@ def test_export_dashboards_versioned_export(app_context, fs):
     assert is_zipfile("dashboard_export_20210101T000000.zip")
 
 
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
 @mock.patch(
-    "superset.dashboards.commands.export.ExportDashboardsCommand.run",
+    "superset.commands.dashboard.export.ExportDashboardsCommand.run",
     side_effect=Exception(),
 )
 def test_failing_export_dashboards_versioned_export(
@@ -137,37 +83,34 @@ def test_failing_export_dashboards_versioned_export(
     caplog.set_level(logging.DEBUG)
 
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_dashboards correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     runner = app.test_cli_runner()
     with freeze_time("2021-01-01T00:00:00Z"):
-        response = runner.invoke(superset.cli.export_dashboards, ())
+        response = runner.invoke(superset.cli.importexport.export_dashboards, ())
 
     assert_cli_fails_properly(response, caplog)
 
 
 @pytest.mark.usefixtures("load_birth_names_dashboard_with_slices")
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
 def test_export_datasources_versioned_export(app_context, fs):
     """
     Test that a ZIP file is exported.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_dashboards correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     runner = app.test_cli_runner()
     with freeze_time("2021-01-01T00:00:00Z"):
-        response = runner.invoke(superset.cli.export_datasources, ())
+        response = runner.invoke(superset.cli.importexport.export_datasources, ())
 
     assert response.exit_code == 0
     assert Path("dataset_export_20210101T000000.zip").exists()
@@ -175,11 +118,8 @@ def test_export_datasources_versioned_export(app_context, fs):
     assert is_zipfile("dataset_export_20210101T000000.zip")
 
 
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
 @mock.patch(
-    "superset.dashboards.commands.export.ExportDatasetsCommand.run",
+    "superset.commands.dashboard.export.ExportDatasetsCommand.run",
     side_effect=Exception(),
 )
 def test_failing_export_datasources_versioned_export(
@@ -189,40 +129,40 @@ def test_failing_export_datasources_versioned_export(
     Test that failing to export ZIP file is done elegantly.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_dashboards correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     runner = app.test_cli_runner()
     with freeze_time("2021-01-01T00:00:00Z"):
-        response = runner.invoke(superset.cli.export_datasources, ())
+        response = runner.invoke(superset.cli.importexport.export_datasources, ())
 
     assert_cli_fails_properly(response, caplog)
 
 
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
-@mock.patch("superset.dashboards.commands.importers.dispatcher.ImportDashboardsCommand")
+@mock.patch("superset.commands.dashboard.importers.dispatcher.ImportDashboardsCommand")
 def test_import_dashboards_versioned_export(import_dashboards_command, app_context, fs):
     """
     Test that both ZIP and JSON can be imported.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_dashboards correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     # write JSON file
     with open("dashboards.json", "w") as fp:
         fp.write('{"hello": "world"}')
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_dashboards, ("-p", "dashboards.json"))
+    response = runner.invoke(
+        superset.cli.importexport.import_dashboards,
+        ("-p", "dashboards.json", "-u", "admin"),
+    )
 
     assert response.exit_code == 0
     expected_contents = {"dashboards.json": '{"hello": "world"}'}
@@ -234,18 +174,18 @@ def test_import_dashboards_versioned_export(import_dashboards_command, app_conte
             fp.write(b"hello: world")
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_dashboards, ("-p", "dashboards.zip"))
+    response = runner.invoke(
+        superset.cli.importexport.import_dashboards,
+        ("-p", "dashboards.zip", "-u", "admin"),
+    )
 
     assert response.exit_code == 0
     expected_contents = {"dashboard.yaml": "hello: world"}
     import_dashboards_command.assert_called_with(expected_contents, overwrite=True)
 
 
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
 @mock.patch(
-    "superset.dashboards.commands.importers.dispatcher.ImportDashboardsCommand.run",
+    "superset.commands.dashboard.importers.dispatcher.ImportDashboardsCommand.run",
     side_effect=Exception(),
 )
 def test_failing_import_dashboards_versioned_export(
@@ -255,18 +195,21 @@ def test_failing_import_dashboards_versioned_export(
     Test that failing to import either ZIP and JSON is done elegantly.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_dashboards correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     # write JSON file
     with open("dashboards.json", "w") as fp:
         fp.write('{"hello": "world"}')
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_dashboards, ("-p", "dashboards.json"))
+    response = runner.invoke(
+        superset.cli.importexport.import_dashboards,
+        ("-p", "dashboards.json", "-u", "admin"),
+    )
 
     assert_cli_fails_properly(response, caplog)
 
@@ -276,32 +219,34 @@ def test_failing_import_dashboards_versioned_export(
             fp.write(b"hello: world")
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_dashboards, ("-p", "dashboards.zip"))
+    response = runner.invoke(
+        superset.cli.importexport.import_dashboards,
+        ("-p", "dashboards.zip", "-u", "admin"),
+    )
 
     assert_cli_fails_properly(response, caplog)
 
 
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
-@mock.patch("superset.datasets.commands.importers.dispatcher.ImportDatasetsCommand")
+@mock.patch("superset.commands.dataset.importers.dispatcher.ImportDatasetsCommand")
 def test_import_datasets_versioned_export(import_datasets_command, app_context, fs):
     """
     Test that both ZIP and YAML can be imported.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_datasets correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     # write YAML file
     with open("datasets.yaml", "w") as fp:
         fp.write("hello: world")
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_datasources, ("-p", "datasets.yaml"))
+    response = runner.invoke(
+        superset.cli.importexport.import_datasources, ("-p", "datasets.yaml")
+    )
 
     assert response.exit_code == 0
     expected_contents = {"datasets.yaml": "hello: world"}
@@ -313,18 +258,17 @@ def test_import_datasets_versioned_export(import_datasets_command, app_context, 
             fp.write(b"hello: world")
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_datasources, ("-p", "datasets.zip"))
+    response = runner.invoke(
+        superset.cli.importexport.import_datasources, ("-p", "datasets.zip")
+    )
 
     assert response.exit_code == 0
     expected_contents = {"dataset.yaml": "hello: world"}
     import_datasets_command.assert_called_with(expected_contents, overwrite=True)
 
 
-@mock.patch.dict(
-    "superset.config.DEFAULT_FEATURE_FLAGS", {"VERSIONED_EXPORT": True}, clear=True
-)
 @mock.patch(
-    "superset.datasets.commands.importers.dispatcher.ImportDatasetsCommand.run",
+    "superset.commands.dataset.importers.dispatcher.ImportDatasetsCommand.run",
     side_effect=Exception(),
 )
 def test_failing_import_datasets_versioned_export(
@@ -334,18 +278,20 @@ def test_failing_import_datasets_versioned_export(
     Test that failing to import either ZIP or YAML is done elegantly.
     """
     # pylint: disable=reimported, redefined-outer-name
-    import superset.cli  # noqa: F811
+    import superset.cli.importexport  # noqa: F811
 
     # reload to define export_datasets correctly based on the
     # feature flags
-    importlib.reload(superset.cli)
+    importlib.reload(superset.cli.importexport)
 
     # write YAML file
     with open("datasets.yaml", "w") as fp:
         fp.write("hello: world")
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_datasources, ("-p", "datasets.yaml"))
+    response = runner.invoke(
+        superset.cli.importexport.import_datasources, ("-p", "datasets.yaml")
+    )
 
     assert_cli_fails_properly(response, caplog)
 
@@ -355,6 +301,23 @@ def test_failing_import_datasets_versioned_export(
             fp.write(b"hello: world")
 
     runner = app.test_cli_runner()
-    response = runner.invoke(superset.cli.import_datasources, ("-p", "datasets.zip"))
+    response = runner.invoke(
+        superset.cli.importexport.import_datasources, ("-p", "datasets.zip")
+    )
 
     assert_cli_fails_properly(response, caplog)
+
+
+@pytest.mark.usefixtures("load_birth_names_dashboard_with_slices")
+@mock.patch("superset.tasks.thumbnails.cache_dashboard_thumbnail")
+def test_compute_thumbnails(thumbnail_mock, app_context, fs):
+    thumbnail_mock.return_value = None
+    runner = app.test_cli_runner()
+    dashboard = db.session.query(Dashboard).filter_by(slug="births").first()
+    response = runner.invoke(
+        superset.cli.thumbnails.compute_thumbnails,
+        ["-d", "-i", dashboard.id],
+    )
+
+    thumbnail_mock.assert_called_with(None, dashboard.id, force=False)
+    assert response.exit_code == 0

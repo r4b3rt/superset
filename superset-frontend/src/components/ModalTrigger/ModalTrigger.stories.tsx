@@ -16,15 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import ModalTrigger from '.';
 
 interface IModalTriggerProps {
-  triggerNode: React.ReactNode;
+  triggerNode: JSX.Element;
   dialogClassName?: string;
-  modalTitle?: React.ReactNode;
-  modalBody?: React.ReactNode;
-  modalFooter?: React.ReactNode;
+  modalTitle?: string;
+  modalBody?: JSX.Element;
+  modalFooter?: JSX.Element;
   beforeOpen?: () => void;
   onExit?: () => void;
   isButton?: boolean;
@@ -43,7 +42,7 @@ export default {
 };
 
 export const InteractiveModalTrigger = (args: IModalTriggerProps) => (
-  <ModalTrigger triggerNode={<span>Click me</span>} {...args} />
+  <ModalTrigger {...args} triggerNode={<span>Click me</span>} />
 );
 
 InteractiveModalTrigger.args = {

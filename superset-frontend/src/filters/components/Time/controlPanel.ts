@@ -34,7 +34,7 @@ const config: ControlPanelConfig = {
             name: 'groupby',
             config: {
               ...sharedControls.groupby,
-              label: 'Column',
+              label: t('Column'),
               required: true,
             },
           },
@@ -50,10 +50,12 @@ const config: ControlPanelConfig = {
             name: 'enableEmptyFilter',
             config: {
               type: 'CheckboxControl',
-              label: t('Required'),
+              label: t('Filter value is required'),
               default: false,
               renderTrigger: true,
-              description: t('User must select a value for this filter.'),
+              description: t(
+                'User must select a value before applying the filter',
+              ),
             },
           },
         ],

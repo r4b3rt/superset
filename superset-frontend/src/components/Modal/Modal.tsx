@@ -16,14 +16,23 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useRef, useState } from 'react';
+import {
+  isValidElement,
+  cloneElement,
+  CSSProperties,
+  ReactNode,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { isNil } from 'lodash';
 import { styled, t } from '@superset-ui/core';
 import { css } from '@emotion/react';
 import {
   Modal as AntdModal,
   ModalProps as AntdModalProps,
-} from 'src/common/components';
+  ModalFuncProps,
+} from 'antd-v5';
 import Button from 'src/components/Button';
 import { Resizable, ResizableProps } from 're-resizable';
 import Draggable, {
@@ -35,21 +44,23 @@ import Draggable, {
 
 export interface ModalProps {
   className?: string;
-  children: React.ReactNode;
+  children: ReactNode;
   disablePrimaryButton?: boolean;
+  primaryTooltipMessage?: ReactNode;
+  primaryButtonLoading?: boolean;
   onHide: () => void;
   onHandledPrimaryAction?: () => void;
   primaryButtonName?: string;
   primaryButtonType?: 'primary' | 'danger';
   show: boolean;
   name?: string;
-  title: React.ReactNode;
+  title: ReactNode;
   width?: string;
   maxWidth?: string;
   responsive?: boolean;
   hideFooter?: boolean;
   centered?: boolean;
-  footer?: React.ReactNode;
+  footer?: ReactNode;
   wrapProps?: object;
   height?: string;
   closable?: boolean;
@@ -58,6 +69,9 @@ export interface ModalProps {
   draggable?: boolean;
   draggableConfig?: DraggableProps;
   destroyOnClose?: boolean;
+  maskClosable?: boolean;
+  zIndex?: number;
+  bodyStyle?: CSSProperties;
 }
 
 interface StyledModalProps {
@@ -69,6 +83,8 @@ interface StyledModalProps {
   resizable?: boolean;
 }
 
+export type { ModalFuncProps };
+
 const MODAL_HEADER_HEIGHT = 55;
 const MODAL_MIN_CONTENT_HEIGHT = 54;
 const MODAL_FOOTER_HEIGHT = 65;
@@ -78,7 +94,7 @@ const RESIZABLE_MIN_WIDTH = '380px';
 const RESIZABLE_MAX_HEIGHT = '100vh';
 const RESIZABLE_MAX_WIDTH = '100vw';
 
-const BaseModal = (props: AntdModalProps) => (
+export const BaseModal = (props: AntdModalProps) => (
   // Removes mask animation. Fixed in 4.6.0.
   // https://github.com/ant-design/ant-design/issues/27192
   <AntdModal {...props} maskTransitionName="" />
@@ -91,23 +107,49 @@ export const StyledModal = styled(BaseModal)<StyledModalProps>`
       max-width: ${maxWidth ?? '900px'};
       padding-left: ${theme.gridUnit * 3}px;
       padding-right: ${theme.gridUnit * 3}px;
+      padding-bottom: 0;
+      top: 0;
     `}
 
-  .ant-modal-header {
-    background-color: ${({ theme }) => theme.colors.grayscale.light4};
+  .antd5-modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: ${({ theme }) => `calc(100vh - ${theme.gridUnit * 8}px)`};
+    margin-bottom: ${({ theme }) => theme.gridUnit * 4}px;
+    margin-top: ${({ theme }) => theme.gridUnit * 4}px;
+    padding: 0;
+  }
+
+  .antd5-modal-header {
+    flex: 0 0 auto;
     border-radius: ${({ theme }) => theme.borderRadius}px
       ${({ theme }) => theme.borderRadius}px 0 0;
-    padding-left: ${({ theme }) => theme.gridUnit * 4}px;
-    padding-right: ${({ theme }) => theme.gridUnit * 4}px;
+    padding: ${({ theme }) => theme.gridUnit * 4}px
+      ${({ theme }) => theme.gridUnit * 6}px;
 
-    .ant-modal-title h4 {
+    .antd5-modal-title {
+      font-weight: ${({ theme }) => theme.typography.weights.medium};
+    }
+
+    .antd5-modal-title h4 {
       display: flex;
       margin: 0;
       align-items: center;
     }
   }
 
-  .ant-modal-close-x {
+  .antd5-modal-close {
+    width: ${({ theme }) => theme.gridUnit * 14}px;
+    height: ${({ theme }) => theme.gridUnit * 14}px;
+    top: 0;
+    right: 0;
+  }
+
+  .antd5-modal-close:hover {
+    background: transparent;
+  }
+
+  .antd5-modal-close-x {
     display: flex;
     align-items: center;
 
@@ -120,19 +162,21 @@ export const StyledModal = styled(BaseModal)<StyledModalProps>`
     }
   }
 
-  .ant-modal-body {
+  .antd5-modal-body {
+    flex: 0 1 auto;
     padding: ${({ theme }) => theme.gridUnit * 4}px;
     overflow: auto;
     ${({ resizable, height }) => !resizable && height && `height: ${height};`}
   }
-  .ant-modal-footer {
+  .antd5-modal-footer {
+    flex: 0 0 1;
     border-top: ${({ theme }) => theme.gridUnit / 4}px solid
       ${({ theme }) => theme.colors.grayscale.light2};
     padding: ${({ theme }) => theme.gridUnit * 4}px;
+    margin-top: 0;
 
     .btn {
       font-size: 12px;
-      text-transform: uppercase;
     }
 
     .btn + .btn {
@@ -147,14 +191,14 @@ export const StyledModal = styled(BaseModal)<StyledModalProps>`
     margin-top: -${({ theme }) => theme.gridUnit * 4}px;
   }
 
-  &.no-content-padding .ant-modal-body {
+  &.no-content-padding .antd5-modal-body {
     padding: 0;
   }
 
   ${({ draggable, theme }) =>
     draggable &&
     `
-    .ant-modal-header {
+    .antd5-modal-header {
       padding: 0;
       .draggable-trigger {
           cursor: move;
@@ -174,10 +218,10 @@ export const StyledModal = styled(BaseModal)<StyledModalProps>`
         height: 100%;
       }
 
-      .ant-modal-content {
+      .antd5-modal-content {
         height: 100%;
 
-        .ant-modal-body {
+        .antd5-modal-body {
           /* 100% - header height - footer height */
           height: ${
             hideFooter
@@ -190,9 +234,30 @@ export const StyledModal = styled(BaseModal)<StyledModalProps>`
   `}
 `;
 
+const defaultResizableConfig = (hideFooter: boolean | undefined) => ({
+  maxHeight: RESIZABLE_MAX_HEIGHT,
+  maxWidth: RESIZABLE_MAX_WIDTH,
+  minHeight: hideFooter
+    ? RESIZABLE_MIN_HEIGHT
+    : RESIZABLE_MIN_HEIGHT + MODAL_FOOTER_HEIGHT,
+  minWidth: RESIZABLE_MIN_WIDTH,
+  enable: {
+    bottom: true,
+    bottomLeft: false,
+    bottomRight: true,
+    left: false,
+    top: false,
+    topLeft: false,
+    topRight: false,
+    right: true,
+  },
+});
+
 const CustomModal = ({
   children,
   disablePrimaryButton = false,
+  primaryTooltipMessage,
+  primaryButtonLoading = false,
   onHide,
   onHandledPrimaryAction,
   primaryButtonName = t('OK'),
@@ -209,24 +274,7 @@ const CustomModal = ({
   wrapProps,
   draggable = false,
   resizable = false,
-  resizableConfig = {
-    maxHeight: RESIZABLE_MAX_HEIGHT,
-    maxWidth: RESIZABLE_MAX_WIDTH,
-    minHeight: hideFooter
-      ? RESIZABLE_MIN_HEIGHT
-      : RESIZABLE_MIN_HEIGHT + MODAL_FOOTER_HEIGHT,
-    minWidth: RESIZABLE_MIN_WIDTH,
-    enable: {
-      bottom: true,
-      bottomLeft: false,
-      bottomRight: true,
-      left: false,
-      top: false,
-      topLeft: false,
-      topRight: false,
-      right: true,
-    },
-  },
+  resizableConfig = defaultResizableConfig(hideFooter),
   draggableConfig,
   destroyOnClose,
   ...rest
@@ -234,7 +282,15 @@ const CustomModal = ({
   const draggableRef = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState<DraggableBounds>();
   const [dragDisabled, setDragDisabled] = useState<boolean>(true);
-  const modalFooter = isNil(footer)
+  let FooterComponent;
+  if (isValidElement(footer)) {
+    // If a footer component is provided inject a closeModal function
+    // so the footer can provide a "close" button if desired
+    FooterComponent = cloneElement(footer, {
+      closeModal: onHide,
+    } as Partial<unknown>);
+  }
+  const modalFooter = isNil(FooterComponent)
     ? [
         <Button key="back" onClick={onHide} cta data-test="modal-cancel-button">
           {t('Cancel')}
@@ -243,6 +299,8 @@ const CustomModal = ({
           key="submit"
           buttonStyle={primaryButtonType}
           disabled={disablePrimaryButton}
+          tooltip={primaryTooltipMessage}
+          loading={primaryButtonLoading}
           onClick={onHandledPrimaryAction}
           cta
           data-test="modal-confirm-button"
@@ -250,7 +308,7 @@ const CustomModal = ({
           {primaryButtonName}
         </Button>,
       ]
-    : footer;
+    : FooterComponent;
 
   const modalWidth = width || (responsive ? '100vw' : '600px');
   const shouldShowMask = !(resizable || draggable);
@@ -268,6 +326,13 @@ const CustomModal = ({
       });
     }
   };
+
+  const getResizableConfig = useMemo(() => {
+    if (Object.keys(resizableConfig).length === 0) {
+      return defaultResizableConfig(hideFooter);
+    }
+    return resizableConfig;
+  }, [hideFooter, resizableConfig]);
 
   const ModalTitle = () =>
     draggable ? (
@@ -290,7 +355,7 @@ const CustomModal = ({
       width={modalWidth}
       maxWidth={maxWidth}
       responsive={responsive}
-      visible={show}
+      open={show}
       title={<ModalTitle />}
       closeIcon={
         <span className="close" aria-hidden="true">
@@ -309,7 +374,7 @@ const CustomModal = ({
             {...draggableConfig}
           >
             {resizable ? (
-              <Resizable className="resizable" {...resizableConfig}>
+              <Resizable className="resizable" {...getResizableConfig}>
                 <div className="resizable-wrapper" ref={draggableRef}>
                   {modal}
                 </div>
@@ -325,7 +390,7 @@ const CustomModal = ({
       mask={shouldShowMask}
       draggable={draggable}
       resizable={resizable}
-      destroyOnClose={destroyOnClose || resizable || draggable}
+      destroyOnClose={destroyOnClose}
       {...rest}
     >
       {children}

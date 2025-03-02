@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { createRef, Component } from 'react';
 import PropTypes from 'prop-types';
 import Button from 'src/components/Button';
 import { styled, t } from '@superset-ui/core';
@@ -24,12 +24,15 @@ import { styled, t } from '@superset-ui/core';
 import ErrorBoundary from 'src/components/ErrorBoundary';
 import Tabs from 'src/components/Tabs';
 import adhocMetricType from 'src/explore/components/controls/MetricControl/adhocMetricType';
-import AdhocFilter, {
-  EXPRESSION_TYPES,
-} from 'src/explore/components/controls/FilterControl/AdhocFilter';
+import AdhocFilter from 'src/explore/components/controls/FilterControl/AdhocFilter';
 import AdhocFilterEditPopoverSimpleTabContent from 'src/explore/components/controls/FilterControl/AdhocFilterEditPopoverSimpleTabContent';
 import AdhocFilterEditPopoverSqlTabContent from 'src/explore/components/controls/FilterControl/AdhocFilterEditPopoverSqlTabContent';
 import columnType from 'src/explore/components/controls/FilterControl/columnType';
+import {
+  POPOVER_INITIAL_HEIGHT,
+  POPOVER_INITIAL_WIDTH,
+} from 'src/explore/constants';
+import { ExpressionTypes } from '../types';
 
 const propTypes = {
   adhocFilter: PropTypes.instanceOf(AdhocFilter).isRequired,
@@ -48,18 +51,11 @@ const propTypes = {
   theme: PropTypes.object,
   sections: PropTypes.arrayOf(PropTypes.string),
   operators: PropTypes.arrayOf(PropTypes.string),
+  requireSave: PropTypes.bool,
 };
 
 const ResizeIcon = styled.i`
   margin-left: ${({ theme }) => theme.gridUnit * 2}px;
-`;
-
-const startingWidth = 320;
-const startingHeight = 240;
-const SectionWrapper = styled.div`
-  .ant-select {
-    margin-bottom: ${({ theme }) => theme.gridUnit * 4}px;
-  }
 `;
 
 const FilterPopoverContentContainer = styled.div`
@@ -77,11 +73,12 @@ const FilterPopoverContentContainer = styled.div`
 
   .filter-edit-clause-info {
     font-size: ${({ theme }) => theme.typography.sizes.xs}px;
-    padding-left: ${({ theme }) => theme.gridUnit}px;
   }
 
   .filter-edit-clause-section {
-    display: inline-flex;
+    display: flex;
+    flex-direction: row;
+    gap: ${({ theme }) => theme.gridUnit * 5}px;
   }
 
   .adhoc-filter-simple-column-dropdown {
@@ -89,7 +86,11 @@ const FilterPopoverContentContainer = styled.div`
   }
 `;
 
-export default class AdhocFilterEditPopover extends React.Component {
+const FilterActionsContainer = styled.div`
+  margin-top: ${({ theme }) => theme.gridUnit * 2}px;
+`;
+
+export default class AdhocFilterEditPopover extends Component {
   constructor(props) {
     super(props);
     this.onSave = this.onSave.bind(this);
@@ -97,17 +98,19 @@ export default class AdhocFilterEditPopover extends React.Component {
     this.onMouseMove = this.onMouseMove.bind(this);
     this.onMouseUp = this.onMouseUp.bind(this);
     this.onAdhocFilterChange = this.onAdhocFilterChange.bind(this);
+    this.setSimpleTabIsValid = this.setSimpleTabIsValid.bind(this);
     this.adjustHeight = this.adjustHeight.bind(this);
     this.onTabChange = this.onTabChange.bind(this);
 
     this.state = {
       adhocFilter: this.props.adhocFilter,
-      width: startingWidth,
-      height: startingHeight,
+      width: POPOVER_INITIAL_WIDTH,
+      height: POPOVER_INITIAL_HEIGHT,
       activeKey: this.props?.adhocFilter?.expressionType || 'SIMPLE',
+      isSimpleTabValid: true,
     };
 
-    this.popoverContentRef = React.createRef();
+    this.popoverContentRef = createRef();
   }
 
   componentDidMount() {
@@ -121,6 +124,10 @@ export default class AdhocFilterEditPopover extends React.Component {
 
   onAdhocFilterChange(adhocFilter) {
     this.setState({ adhocFilter });
+  }
+
+  setSimpleTabIsValid(isValid) {
+    this.setState({ isSimpleTabValid: isValid });
   }
 
   onSave() {
@@ -141,11 +148,11 @@ export default class AdhocFilterEditPopover extends React.Component {
     this.setState({
       width: Math.max(
         this.dragStartWidth + (e.clientX - this.dragStartX),
-        startingWidth,
+        POPOVER_INITIAL_WIDTH,
       ),
       height: Math.max(
-        this.dragStartHeight + (e.clientY - this.dragStartY) * 2,
-        startingHeight,
+        this.dragStartHeight + (e.clientY - this.dragStartY),
+        POPOVER_INITIAL_HEIGHT,
       ),
     });
   }
@@ -173,50 +180,16 @@ export default class AdhocFilterEditPopover extends React.Component {
       onResize,
       datasource,
       partitionColumn,
-      sections = ['SIMPLE', 'CUSTOM_SQL'],
       theme,
       operators,
+      requireSave,
       ...popoverProps
     } = this.props;
 
     const { adhocFilter } = this.state;
-
-    const resultSections =
-      datasource?.type === 'druid'
-        ? sections.filter(s => s !== 'CUSTOM_SQL')
-        : sections;
-
     const stateIsValid = adhocFilter.isValid();
-    const hasUnsavedChanges = !adhocFilter.equals(propsAdhocFilter);
-
-    const sectionRenders = {};
-
-    sectionRenders.CUSTOM_SQL = (
-      <ErrorBoundary>
-        <AdhocFilterEditPopoverSqlTabContent
-          adhocFilter={this.state.adhocFilter}
-          onChange={this.onAdhocFilterChange}
-          options={this.props.options}
-          height={this.state.height}
-          activeKey={this.state.activeKey}
-        />
-      </ErrorBoundary>
-    );
-
-    sectionRenders.SIMPLE = (
-      <ErrorBoundary>
-        <AdhocFilterEditPopoverSimpleTabContent
-          operators={operators}
-          adhocFilter={this.state.adhocFilter}
-          onChange={this.onAdhocFilterChange}
-          options={options}
-          datasource={datasource}
-          onHeightChange={this.adjustHeight}
-          partitionColumn={partitionColumn}
-          popoverRef={this.popoverContentRef.current}
-        />
-      </ErrorBoundary>
-    );
+    const hasUnsavedChanges =
+      requireSave || !adhocFilter.equals(propsAdhocFilter);
 
     return (
       <FilterPopoverContentContainer
@@ -225,48 +198,62 @@ export default class AdhocFilterEditPopover extends React.Component {
         data-test="filter-edit-popover"
         ref={this.popoverContentRef}
       >
-        {resultSections.length > 1 ? (
-          <Tabs
-            id="adhoc-filter-edit-tabs"
-            defaultActiveKey={adhocFilter.expressionType}
-            className="adhoc-filter-edit-tabs"
-            data-test="adhoc-filter-edit-tabs"
-            style={{ minHeight: this.state.height, width: this.state.width }}
-            allowOverflow
-            onChange={this.onTabChange}
+        <Tabs
+          id="adhoc-filter-edit-tabs"
+          defaultActiveKey={adhocFilter.expressionType}
+          className="adhoc-filter-edit-tabs"
+          data-test="adhoc-filter-edit-tabs"
+          style={{ minHeight: this.state.height, width: this.state.width }}
+          allowOverflow
+          onChange={this.onTabChange}
+        >
+          <Tabs.TabPane
+            className="adhoc-filter-edit-tab"
+            key={ExpressionTypes.Simple}
+            tab={t('Simple')}
           >
-            {resultSections.includes('SIMPLE') && (
-              <Tabs.TabPane
-                className="adhoc-filter-edit-tab"
-                key={EXPRESSION_TYPES.SIMPLE}
-                tab={t('Simple')}
-              >
-                {sectionRenders.SIMPLE}
-              </Tabs.TabPane>
-            )}
-            {resultSections.includes('CUSTOM_SQL') && (
-              <Tabs.TabPane
-                className="adhoc-filter-edit-tab"
-                key={EXPRESSION_TYPES.SQL}
-                tab={t('Custom SQL')}
-              >
-                {sectionRenders.CUSTOM_SQL}
-              </Tabs.TabPane>
-            )}
-          </Tabs>
-        ) : (
-          <SectionWrapper>{sectionRenders[resultSections[0]]}</SectionWrapper>
-        )}
-        <div>
+            <ErrorBoundary>
+              <AdhocFilterEditPopoverSimpleTabContent
+                operators={operators}
+                adhocFilter={this.state.adhocFilter}
+                onChange={this.onAdhocFilterChange}
+                options={options}
+                datasource={datasource}
+                onHeightChange={this.adjustHeight}
+                partitionColumn={partitionColumn}
+                popoverRef={this.popoverContentRef.current}
+                validHandler={this.setSimpleTabIsValid}
+              />
+            </ErrorBoundary>
+          </Tabs.TabPane>
+          <Tabs.TabPane
+            className="adhoc-filter-edit-tab"
+            key={ExpressionTypes.Sql}
+            tab={t('Custom SQL')}
+          >
+            <ErrorBoundary>
+              <AdhocFilterEditPopoverSqlTabContent
+                adhocFilter={this.state.adhocFilter}
+                onChange={this.onAdhocFilterChange}
+                options={this.props.options}
+                height={this.state.height}
+                activeKey={this.state.activeKey}
+              />
+            </ErrorBoundary>
+          </Tabs.TabPane>
+        </Tabs>
+        <FilterActionsContainer>
           <Button buttonSize="small" onClick={this.props.onClose} cta>
             {t('Close')}
           </Button>
           <Button
             data-test="adhoc-filter-edit-popover-save-button"
-            disabled={!stateIsValid}
-            buttonStyle={
-              hasUnsavedChanges && stateIsValid ? 'primary' : 'default'
+            disabled={
+              !stateIsValid ||
+              !this.state.isSimpleTabValid ||
+              !hasUnsavedChanges
             }
+            buttonStyle="primary"
             buttonSize="small"
             className="m-r-5"
             onClick={this.onSave}
@@ -281,7 +268,7 @@ export default class AdhocFilterEditPopover extends React.Component {
             onMouseDown={this.onDragDown}
             className="fa fa-expand edit-popover-resize text-muted"
           />
-        </div>
+        </FilterActionsContainer>
       </FilterPopoverContentContainer>
     );
   }

@@ -25,6 +25,10 @@ import {
   ExtraFormData,
 } from '@superset-ui/core';
 import { FALSE_STRING, NULL_STRING, TRUE_STRING } from 'src/utils/common';
+import {
+  Clauses,
+  ExpressionTypes,
+} from '../explore/components/controls/FilterControl/types';
 
 export const getSelectExtraFormData = (
   col: string,
@@ -36,8 +40,8 @@ export const getSelectExtraFormData = (
   if (emptyFilter) {
     extra.adhoc_filters = [
       {
-        expressionType: 'SQL',
-        clause: 'WHERE',
+        expressionType: ExpressionTypes.Sql,
+        clause: Clauses.Where,
         sqlExpression: '1 = 0',
       },
     ];
@@ -60,11 +64,20 @@ export const getRangeExtraFormData = (
   upper?: number | null,
 ) => {
   const filters: QueryObjectFilterClause[] = [];
-  if (lower !== undefined && lower !== null) {
+  if (lower !== undefined && lower !== null && lower !== upper) {
     filters.push({ col, op: '>=', val: lower });
   }
-  if (upper !== undefined && upper !== null) {
+  if (upper !== undefined && upper !== null && upper !== lower) {
     filters.push({ col, op: '<=', val: upper });
+  }
+  if (
+    upper !== undefined &&
+    upper !== null &&
+    lower !== undefined &&
+    lower !== null &&
+    upper === lower
+  ) {
+    filters.push({ col, op: '==', val: upper });
   }
 
   return filters.length
@@ -92,7 +105,7 @@ export function getDataRecordFormatter({
     if (typeof value === 'boolean') {
       return value ? TRUE_STRING : FALSE_STRING;
     }
-    if (dtype === GenericDataType.BOOLEAN) {
+    if (dtype === GenericDataType.Boolean) {
       try {
         return JSON.parse(String(value).toLowerCase())
           ? TRUE_STRING
@@ -104,13 +117,13 @@ export function getDataRecordFormatter({
     if (typeof value === 'string') {
       return value;
     }
-    if (timeFormatter && dtype === GenericDataType.TEMPORAL) {
+    if (timeFormatter && dtype === GenericDataType.Temporal) {
       return timeFormatter(value);
     }
     if (
       numberFormatter &&
       typeof value === 'number' &&
-      dtype === GenericDataType.NUMERIC
+      dtype === GenericDataType.Numeric
     ) {
       return numberFormatter(value);
     }

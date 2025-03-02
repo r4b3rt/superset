@@ -16,10 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { Component } from 'react';
 import PropTypes from 'prop-types';
-import { TextArea } from 'src/common/components';
-import { t } from '@superset-ui/core';
+import { TextArea } from 'src/components/Input';
+import {
+  Tooltip,
+  TooltipProps as TooltipOptions,
+} from 'src/components/Tooltip';
+import { t, withTheme } from '@superset-ui/core';
 
 import Button from 'src/components/Button';
 import { TextAreaEditor } from 'src/components/AsyncAceEditor';
@@ -45,6 +49,17 @@ const propTypes = {
   ]),
   aboveEditorSection: PropTypes.node,
   readOnly: PropTypes.bool,
+  resize: PropTypes.oneOf([
+    null,
+    'block',
+    'both',
+    'horizontal',
+    'inline',
+    'none',
+    'vertical',
+  ]),
+  textAreaStyles: PropTypes.object,
+  tooltipOptions: PropTypes.oneOf([null, TooltipOptions]),
 };
 
 const defaultProps = {
@@ -55,55 +70,82 @@ const defaultProps = {
   maxLines: 10,
   offerEditInModal: true,
   readOnly: false,
+  resize: null,
+  textAreaStyles: {},
+  tooltipOptions: {},
 };
 
-export default class TextAreaControl extends React.Component {
+class TextAreaControl extends Component {
   onControlChange(event) {
     const { value } = event.target;
+    this.props.onChange(value);
+  }
+
+  onAreaEditorChange(value) {
     this.props.onChange(value);
   }
 
   renderEditor(inModal = false) {
     const minLines = inModal ? 40 : this.props.minLines || 12;
     if (this.props.language) {
-      const style = { border: '1px solid #CCC' };
+      const style = {
+        border: `1px solid ${this.props.theme.colors.grayscale.light1}`,
+        minHeight: `${minLines}em`,
+        width: 'auto',
+        ...this.props.textAreaStyles,
+      };
+      if (this.props.resize) {
+        style.resize = this.props.resize;
+      }
       if (this.props.readOnly) {
         style.backgroundColor = '#f2f2f2';
       }
-      return (
-        <TextAreaEditor
-          mode={this.props.language}
-          style={style}
-          minLines={minLines}
-          maxLines={inModal ? 1000 : this.props.maxLines}
-          onChange={this.props.onChange}
-          width="100%"
-          height={`${minLines}em`}
-          editorProps={{ $blockScrolling: true }}
-          defaultValue={this.props.initialValue}
-          readOnly={this.props.readOnly}
-          key={this.props.name}
-          {...this.props}
-        />
+      const codeEditor = (
+        <div>
+          <TextAreaEditor
+            mode={this.props.language}
+            style={style}
+            minLines={minLines}
+            maxLines={inModal ? 1000 : this.props.maxLines}
+            editorProps={{ $blockScrolling: true }}
+            defaultValue={this.props.initialValue}
+            readOnly={this.props.readOnly}
+            key={this.props.name}
+            {...this.props}
+            onChange={this.onAreaEditorChange.bind(this)}
+          />
+        </div>
       );
+
+      if (this.props.tooltipOptions) {
+        return <Tooltip {...this.props.tooltipOptions}>{codeEditor}</Tooltip>;
+      }
+      return codeEditor;
     }
-    return (
-      <TextArea
-        placeholder={t('textarea')}
-        onChange={this.onControlChange.bind(this)}
-        defaultValue={this.props.initialValue}
-        disabled={this.props.readOnly}
-        style={{ height: this.props.height }}
-      />
+
+    const textArea = (
+      <div>
+        <TextArea
+          placeholder={t('textarea')}
+          onChange={this.onControlChange.bind(this)}
+          defaultValue={this.props.initialValue}
+          disabled={this.props.readOnly}
+          style={{ height: this.props.height }}
+        />
+      </div>
     );
+    if (this.props.tooltipOptions) {
+      return <Tooltip {...this.props.tooltipOptions}>{textArea}</Tooltip>;
+    }
+    return textArea;
   }
 
   renderModalBody() {
     return (
-      <div>
+      <>
         <div>{this.props.aboveEditorSection}</div>
         {this.renderEditor(true)}
-      </div>
+      </>
     );
   }
 
@@ -133,3 +175,5 @@ export default class TextAreaControl extends React.Component {
 
 TextAreaControl.propTypes = propTypes;
 TextAreaControl.defaultProps = defaultProps;
+
+export default withTheme(TextAreaControl);

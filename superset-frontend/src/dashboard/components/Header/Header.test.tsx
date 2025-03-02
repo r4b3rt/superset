@@ -16,21 +16,21 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { render, screen, fireEvent } from 'spec/helpers/testing-library';
-import userEvent from '@testing-library/user-event';
-import sinon from 'sinon';
+import * as redux from 'redux';
+import {
+  render,
+  screen,
+  fireEvent,
+  userEvent,
+} from 'spec/helpers/testing-library';
 import fetchMock from 'fetch-mock';
-import * as actions from 'src/reports/actions/reports';
-import * as featureFlags from 'src/featureFlags';
-import mockState from 'spec/fixtures/mockStateWithoutUser';
-import { HeaderProps } from './types';
+import { getExtensionsRegistry, JsonObject } from '@superset-ui/core';
+import setupExtensions from 'src/setup/setupExtensions';
+import getOwnerName from 'src/utils/getOwnerName';
 import Header from '.';
+import { DASHBOARD_HEADER_ID } from '../../util/constants';
 
-const createProps = () => ({
-  addSuccessToast: jest.fn(),
-  addDangerToast: jest.fn(),
-  addWarningToast: jest.fn(),
+const initialState = {
   dashboardInfo: {
     id: 1,
     dash_edit_perm: false,
@@ -39,8 +39,26 @@ const createProps = () => ({
     userId: '1',
     metadata: {},
     common: {
-      conf: {},
+      conf: {
+        DASHBOARD_AUTO_REFRESH_INTERVALS: [
+          [0, "Don't refresh"],
+          [10, '10 seconds'],
+        ],
+      },
     },
+    changed_on_delta_humanized: '7 minutes ago',
+    changed_by: {
+      id: 3,
+      first_name: 'John',
+      last_name: 'Doe',
+    },
+    created_on_delta_humanized: '10 days ago',
+    created_by: {
+      id: 2,
+      first_name: 'Kay',
+      last_name: 'Mon',
+    },
+    owners: [{ first_name: 'John', last_name: 'Doe', id: 1 }],
   },
   user: {
     createdOn: '2021-04-27T18:12:38.952304',
@@ -53,416 +71,386 @@ const createProps = () => ({
     userId: 1,
     username: 'admin',
   },
-  reports: {},
-  dashboardTitle: 'Dashboard Title',
+  dashboardState: {
+    sliceIds: [],
+    expandedSlices: {},
+    refreshFrequency: 0,
+    shouldPersistRefreshFrequency: false,
+    css: '',
+    isStarred: false,
+    isPublished: false,
+    hasUnsavedChanges: false,
+    maxUndoHistoryExceeded: false,
+    editMode: false,
+    lastModifiedTime: 0,
+  },
   charts: {},
-  layout: {},
-  expandedSlices: {},
-  css: '',
-  customCss: '',
-  isStarred: false,
-  isLoading: false,
-  lastModifiedTime: 0,
-  refreshFrequency: 0,
-  shouldPersistRefreshFrequency: false,
-  onSave: jest.fn(),
-  onChange: jest.fn(),
-  fetchFaveStar: jest.fn(),
-  fetchCharts: jest.fn(),
-  onRefresh: jest.fn(),
-  fetchUISpecificReport: jest.fn(),
-  saveFaveStar: jest.fn(),
-  savePublished: jest.fn(),
-  isPublished: false,
-  updateDashboardTitle: jest.fn(),
-  editMode: false,
-  setEditMode: jest.fn(),
-  showBuilderPane: jest.fn(),
-  updateCss: jest.fn(),
-  setColorSchemeAndUnsavedChanges: jest.fn(),
-  logEvent: jest.fn(),
-  setRefreshFrequency: jest.fn(),
-  hasUnsavedChanges: false,
-  maxUndoHistoryExceeded: false,
-  onUndo: jest.fn(),
-  onRedo: jest.fn(),
-  undoLength: 0,
-  redoLength: 0,
-  setMaxUndoHistoryExceeded: jest.fn(),
-  maxUndoHistoryToast: jest.fn(),
-  dashboardInfoChanged: jest.fn(),
-  dashboardTitleChanged: jest.fn(),
-});
-const props = createProps();
-const editableProps = {
-  ...props,
-  editMode: true,
+  dashboardLayout: {
+    present: {
+      [DASHBOARD_HEADER_ID]: {
+        meta: {
+          text: 'Dashboard Title',
+        },
+      },
+    },
+    past: [],
+    future: [],
+  },
+};
+
+const editableState = {
+  dashboardState: {
+    ...initialState.dashboardState,
+    editMode: true,
+  },
   dashboardInfo: {
-    ...props.dashboardInfo,
+    ...initialState.dashboardInfo,
     dash_edit_perm: true,
     dash_save_perm: true,
   },
 };
-const undoProps = {
-  ...editableProps,
-  undoLength: 1,
-};
-const redoProps = {
-  ...editableProps,
-  redoLength: 1,
+
+const undoState = {
+  ...editableState,
+  dashboardLayout: {
+    ...initialState.dashboardLayout,
+    past: [{}],
+  },
 };
 
-const REPORT_ENDPOINT = 'glob:*/api/v1/report*';
+const redoState = {
+  ...editableState,
+  dashboardLayout: {
+    ...initialState.dashboardLayout,
+    future: [{}],
+  },
+};
 
 fetchMock.get('glob:*/csstemplateasyncmodelview/api/read', {});
-fetchMock.get(REPORT_ENDPOINT, {});
 
-function setup(props: HeaderProps) {
-  return (
+function setup(overrideState: JsonObject = {}) {
+  return render(
     <div className="dashboard">
-      <Header {...props} />
-    </div>
+      <Header />
+    </div>,
+    { useRedux: true, initialState: { ...initialState, ...overrideState } },
   );
 }
 
 async function openActionsDropdown() {
   const btn = screen.getByRole('img', { name: 'more-horiz' });
   userEvent.click(btn);
-  expect(await screen.findByRole('menu')).toBeInTheDocument();
+  expect(await screen.findByTestId('header-actions-menu')).toBeInTheDocument();
 }
 
+const addSuccessToast = jest.fn();
+const addDangerToast = jest.fn();
+const addWarningToast = jest.fn();
+const onUndo = jest.fn();
+const onRedo = jest.fn();
+const setEditMode = jest.fn();
+const setUnsavedChanges = jest.fn();
+const fetchFaveStar = jest.fn();
+const saveFaveStar = jest.fn();
+const savePublished = jest.fn();
+const fetchCharts = jest.fn();
+const updateDashboardTitle = jest.fn();
+const updateCss = jest.fn();
+const onChange = jest.fn();
+const onSave = jest.fn();
+const setMaxUndoHistoryExceeded = jest.fn();
+const maxUndoHistoryToast = jest.fn();
+const logEvent = jest.fn();
+const setRefreshFrequency = jest.fn();
+const onRefresh = jest.fn();
+const dashboardInfoChanged = jest.fn();
+const dashboardTitleChanged = jest.fn();
+
+beforeAll(() => {
+  jest.spyOn(redux, 'bindActionCreators').mockImplementation(() => ({
+    addSuccessToast,
+    addDangerToast,
+    addWarningToast,
+    onUndo,
+    onRedo,
+    setEditMode,
+    setUnsavedChanges,
+    fetchFaveStar,
+    saveFaveStar,
+    savePublished,
+    fetchCharts,
+    updateDashboardTitle,
+    updateCss,
+    onChange,
+    onSave,
+    setMaxUndoHistoryExceeded,
+    maxUndoHistoryToast,
+    logEvent,
+    setRefreshFrequency,
+    onRefresh,
+    dashboardInfoChanged,
+    dashboardTitleChanged,
+  }));
+});
+
+beforeEach(() => {
+  jest.clearAllMocks();
+});
+
 test('should render', () => {
-  const mockedProps = createProps();
-  const { container } = render(setup(mockedProps));
+  const { container } = setup();
   expect(container).toBeInTheDocument();
 });
 
 test('should render the title', () => {
-  const mockedProps = createProps();
-  render(setup(mockedProps));
-  expect(screen.getByText('Dashboard Title')).toBeInTheDocument();
+  setup();
+  expect(screen.getByTestId('editable-title')).toHaveTextContent(
+    'Dashboard Title',
+  );
 });
 
 test('should render the editable title', () => {
-  render(setup(editableProps));
+  setup(editableState);
   expect(screen.getByDisplayValue('Dashboard Title')).toBeInTheDocument();
 });
 
 test('should edit the title', () => {
-  render(setup(editableProps));
+  setup(editableState);
   const editableTitle = screen.getByDisplayValue('Dashboard Title');
-  expect(editableProps.onChange).not.toHaveBeenCalled();
+  expect(onChange).not.toHaveBeenCalled();
   userEvent.click(editableTitle);
   userEvent.clear(editableTitle);
   userEvent.type(editableTitle, 'New Title');
   userEvent.click(document.body);
-  expect(editableProps.onChange).toHaveBeenCalled();
+  expect(onChange).toHaveBeenCalled();
   expect(screen.getByDisplayValue('New Title')).toBeInTheDocument();
 });
 
 test('should render the "Draft" status', () => {
-  const mockedProps = createProps();
-  render(setup(mockedProps));
+  setup();
   expect(screen.getByText('Draft')).toBeInTheDocument();
 });
 
 test('should publish', () => {
-  render(setup(editableProps));
+  const canEditState = {
+    dashboardInfo: {
+      ...initialState.dashboardInfo,
+      dash_edit_perm: true,
+      dash_save_perm: true,
+    },
+  };
+  setup(canEditState);
   const draft = screen.getByText('Draft');
-  expect(editableProps.savePublished).not.toHaveBeenCalled();
+  expect(savePublished).toHaveBeenCalledTimes(0);
   userEvent.click(draft);
-  expect(editableProps.savePublished).toHaveBeenCalledTimes(1);
+  expect(savePublished).toHaveBeenCalledTimes(1);
+});
+
+test('should render metadata', () => {
+  setup();
+  expect(
+    screen.getByText(getOwnerName(initialState.dashboardInfo.created_by)),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(initialState.dashboardInfo.changed_on_delta_humanized),
+  ).toBeInTheDocument();
 });
 
 test('should render the "Undo" action as disabled', () => {
-  render(setup(editableProps));
-  expect(screen.getByTitle('Undo').parentElement).toBeDisabled();
+  setup(editableState);
+  expect(screen.getByTestId('undo-action').parentElement).toBeDisabled();
 });
 
 test('should undo', () => {
-  render(setup(undoProps));
-  const undo = screen.getByTitle('Undo');
-  expect(undoProps.onUndo).not.toHaveBeenCalled();
+  setup(undoState);
+  const undo = screen.getByTestId('undo-action');
+  expect(onUndo).not.toHaveBeenCalled();
   userEvent.click(undo);
-  expect(undoProps.onUndo).toHaveBeenCalledTimes(1);
+  expect(onUndo).toHaveBeenCalledTimes(1);
 });
 
 test('should undo with key listener', () => {
-  undoProps.onUndo.mockReset();
-  render(setup(undoProps));
-  expect(undoProps.onUndo).not.toHaveBeenCalled();
+  onUndo.mockReset();
+  setup(undoState);
+  expect(onUndo).not.toHaveBeenCalled();
   fireEvent.keyDown(document.body, { key: 'z', code: 'KeyZ', ctrlKey: true });
-  expect(undoProps.onUndo).toHaveBeenCalledTimes(1);
+  expect(onUndo).toHaveBeenCalledTimes(1);
 });
 
 test('should render the "Redo" action as disabled', () => {
-  render(setup(editableProps));
-  expect(screen.getByTitle('Redo').parentElement).toBeDisabled();
+  setup(editableState);
+  expect(screen.getByTestId('redo-action').parentElement).toBeDisabled();
 });
 
 test('should redo', () => {
-  render(setup(redoProps));
-  const redo = screen.getByTitle('Redo');
-  expect(redoProps.onRedo).not.toHaveBeenCalled();
+  setup(redoState);
+  const redo = screen.getByTestId('redo-action');
+  expect(onRedo).not.toHaveBeenCalled();
   userEvent.click(redo);
-  expect(redoProps.onRedo).toHaveBeenCalledTimes(1);
+  expect(onRedo).toHaveBeenCalledTimes(1);
 });
 
 test('should redo with key listener', () => {
-  redoProps.onRedo.mockReset();
-  render(setup(redoProps));
-  expect(redoProps.onRedo).not.toHaveBeenCalled();
+  setup(redoState);
+  expect(onRedo).not.toHaveBeenCalled();
   fireEvent.keyDown(document.body, { key: 'y', code: 'KeyY', ctrlKey: true });
-  expect(redoProps.onRedo).toHaveBeenCalledTimes(1);
+  expect(onRedo).toHaveBeenCalledTimes(1);
 });
 
 test('should render the "Discard changes" button', () => {
-  render(setup(editableProps));
-  expect(screen.getByText('Discard changes')).toBeInTheDocument();
+  setup(editableState);
+  expect(screen.getByText('Discard')).toBeInTheDocument();
 });
 
 test('should render the "Save" button as disabled', () => {
-  render(setup(editableProps));
+  setup(editableState);
   expect(screen.getByText('Save').parentElement).toBeDisabled();
 });
 
 test('should save', () => {
-  const unsavedProps = {
-    ...editableProps,
-    hasUnsavedChanges: true,
+  const unsavedState = {
+    ...editableState,
+    dashboardState: {
+      ...editableState.dashboardState,
+      hasUnsavedChanges: true,
+    },
   };
-  render(setup(unsavedProps));
+  setup(unsavedState);
   const save = screen.getByText('Save');
-  expect(unsavedProps.onSave).not.toHaveBeenCalled();
+  expect(onSave).not.toHaveBeenCalled();
   userEvent.click(save);
-  expect(unsavedProps.onSave).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledTimes(1);
 });
 
 test('should NOT render the "Draft" status', () => {
-  const mockedProps = createProps();
-  const publishedProps = {
-    ...mockedProps,
-    isPublished: true,
+  const publishedState = {
+    ...initialState,
+    dashboardState: {
+      ...initialState.dashboardState,
+      isPublished: true,
+    },
   };
-  render(setup(publishedProps));
+  setup(publishedState);
   expect(screen.queryByText('Draft')).not.toBeInTheDocument();
 });
 
 test('should render the unselected fave icon', () => {
-  const mockedProps = createProps();
-  render(setup(mockedProps));
-  expect(mockedProps.fetchFaveStar).toHaveBeenCalled();
+  setup();
+  expect(fetchFaveStar).toHaveBeenCalled();
   expect(
     screen.getByRole('img', { name: 'favorite-unselected' }),
   ).toBeInTheDocument();
 });
 
 test('should render the selected fave icon', () => {
-  const mockedProps = createProps();
-  const favedProps = {
-    ...mockedProps,
-    isStarred: true,
+  const favedState = {
+    dashboardState: {
+      ...initialState.dashboardState,
+      isStarred: true,
+    },
   };
-  render(setup(favedProps));
+  setup(favedState);
   expect(
     screen.getByRole('img', { name: 'favorite-selected' }),
   ).toBeInTheDocument();
 });
 
 test('should NOT render the fave icon on anonymous user', () => {
-  const mockedProps = createProps();
-  const anonymousUserProps = {
-    ...mockedProps,
+  const anonymousUserState = {
     user: undefined,
   };
-  render(setup(anonymousUserProps));
+  setup(anonymousUserState);
   expect(() =>
     screen.getByRole('img', { name: 'favorite-unselected' }),
-  ).toThrowError('Unable to find');
-  expect(() =>
-    screen.getByRole('img', { name: 'favorite-selected' }),
-  ).toThrowError('Unable to find');
+  ).toThrow('Unable to find');
+  expect(() => screen.getByRole('img', { name: 'favorite-selected' })).toThrow(
+    'Unable to find',
+  );
 });
 
 test('should fave', async () => {
-  const mockedProps = createProps();
-  render(setup(mockedProps));
+  setup();
   const fave = screen.getByRole('img', { name: 'favorite-unselected' });
-  expect(mockedProps.saveFaveStar).not.toHaveBeenCalled();
+  expect(saveFaveStar).not.toHaveBeenCalled();
   userEvent.click(fave);
-  expect(mockedProps.saveFaveStar).toHaveBeenCalledTimes(1);
+  expect(saveFaveStar).toHaveBeenCalledTimes(1);
 });
 
 test('should toggle the edit mode', () => {
-  const mockedProps = createProps();
-  const canEditProps = {
-    ...mockedProps,
+  const canEditState = {
     dashboardInfo: {
-      ...mockedProps.dashboardInfo,
+      ...initialState.dashboardInfo,
       dash_edit_perm: true,
     },
   };
-  render(setup(canEditProps));
-  const editDashboard = screen.getByTitle('Edit dashboard');
-  expect(screen.queryByTitle('Edit dashboard')).toBeInTheDocument();
+  setup(canEditState);
+  const editDashboard = screen.getByText('Edit dashboard');
+  expect(screen.queryByText('Edit dashboard')).toBeInTheDocument();
   userEvent.click(editDashboard);
-  expect(mockedProps.logEvent).toHaveBeenCalled();
+  expect(logEvent).toHaveBeenCalled();
 });
 
 test('should render the dropdown icon', () => {
-  const mockedProps = createProps();
-  render(setup(mockedProps));
+  setup();
   expect(screen.getByRole('img', { name: 'more-horiz' })).toBeInTheDocument();
 });
 
 test('should refresh the charts', async () => {
-  const mockedProps = createProps();
-  render(setup(mockedProps));
+  setup();
   await openActionsDropdown();
   userEvent.click(screen.getByText('Refresh dashboard'));
-  expect(mockedProps.onRefresh).toHaveBeenCalledTimes(1);
+  expect(onRefresh).toHaveBeenCalledTimes(1);
 });
 
-describe('Email Report Modal', () => {
-  let isFeatureEnabledMock: any;
-  let dispatch: any;
+test('should render an extension component if one is supplied', () => {
+  const extensionsRegistry = getExtensionsRegistry();
+  extensionsRegistry.set('dashboard.nav.right', () => (
+    <>dashboard.nav.right extension component</>
+  ));
+  setupExtensions();
 
-  beforeEach(async () => {
-    isFeatureEnabledMock = jest
-      .spyOn(featureFlags, 'isFeatureEnabled')
-      .mockImplementation(() => true);
-    dispatch = sinon.spy();
-  });
+  setup();
+  expect(
+    screen.getByText('dashboard.nav.right extension component'),
+  ).toBeInTheDocument();
+});
 
-  afterAll(() => {
-    isFeatureEnabledMock.mockRestore();
-  });
+test('should NOT render MetadataBar when in edit mode', () => {
+  const state = {
+    ...editableState,
+    dashboardInfo: {
+      ...initialState.dashboardInfo,
+      userId: '123',
+    },
+  };
+  setup(state);
+  expect(
+    screen.queryByText(state.dashboardInfo.changed_on_delta_humanized),
+  ).not.toBeInTheDocument();
+});
 
-  it('creates a new email report', async () => {
-    // ---------- Render/value setup ----------
-    const mockedProps = createProps();
-    render(setup(mockedProps), { useRedux: true });
+test('should NOT render MetadataBar when embedded', () => {
+  const state = {
+    dashboardInfo: {
+      ...initialState.dashboardInfo,
+      userId: undefined,
+    },
+  };
+  setup(state);
+  expect(
+    screen.queryByText(state.dashboardInfo.changed_on_delta_humanized),
+  ).not.toBeInTheDocument();
+});
 
-    const reportValues = {
-      id: 1,
-      result: {
-        active: true,
-        creation_method: 'dashboards',
-        crontab: '0 12 * * 1',
-        dashboard: mockedProps.dashboardInfo.id,
-        name: 'Weekly Report',
-        owners: [mockedProps.user.userId],
-        recipients: [
-          {
-            recipient_config_json: {
-              target: mockedProps.user.email,
-            },
-            type: 'Email',
-          },
-        ],
-        type: 'Report',
-      },
-    };
-    // This is needed to structure the reportValues to match the fetchMock return
-    const stringyReportValues = `{"id":1,"result":{"active":true,"creation_method":"dashboards","crontab":"0 12 * * 1","dashboard":${mockedProps.dashboardInfo.id},"name":"Weekly Report","owners":[${mockedProps.user.userId}],"recipients":[{"recipient_config_json":{"target":"${mockedProps.user.email}"},"type":"Email"}],"type":"Report"}}`;
-    // Watch for report POST
-    fetchMock.post(REPORT_ENDPOINT, reportValues);
-
-    screen.logTestingPlaygroundURL();
-    // ---------- Begin tests ----------
-    // Click calendar icon to open email report modal
-    const emailReportModalButton = screen.getByRole('button', {
-      name: /schedule email report/i,
-    });
-    userEvent.click(emailReportModalButton);
-
-    // Click "Add" button to create a new email report
-    const addButton = screen.getByRole('button', { name: /add/i });
-    userEvent.click(addButton);
-
-    // Mock addReport from Redux
-    const makeRequest = () => {
-      const request = actions.addReport(reportValues);
-      return request(dispatch);
-    };
-
-    return makeRequest().then(() => {
-      // 🐞 ----- There are 2 POST calls at this point ----- 🐞
-
-      // addReport's mocked POST return should match the mocked values
-      expect(fetchMock.lastOptions()?.body).toEqual(stringyReportValues);
-      // Dispatch should be called once for addReport
-      expect(dispatch.callCount).toBe(2);
-      const reportCalls = fetchMock.calls(REPORT_ENDPOINT);
-      expect(reportCalls).toHaveLength(2);
-    });
-  });
-
-  it('edits an existing email report', async () => {
-    // TODO (lyndsiWilliams): This currently does not work, see TODOs below
-    //  The modal does appear with the edit title, but the PUT call is not registering
-
-    // ---------- Render/value setup ----------
-    const mockedProps = createProps();
-    const editedReportValues = {
-      active: true,
-      creation_method: 'dashboards',
-      crontab: '0 12 * * 1',
-      dashboard: mockedProps.dashboardInfo.id,
-      name: 'Weekly Report edit',
-      owners: [mockedProps.user.userId],
-      recipients: [
-        {
-          recipient_config_json: {
-            target: mockedProps.user.email,
-          },
-          type: 'Email',
-        },
-      ],
-      type: 'Report',
-    };
-
-    // getMockStore({ reports: reportValues });
-    render(setup(mockedProps), {
-      useRedux: true,
-      initialState: mockState,
-    });
-    // TODO (lyndsiWilliams): currently fetchMock detects this PUT
-    //  address as 'glob:*/api/v1/report/undefined', is not detected
-    //  on fetchMock.calls()
-    fetchMock.put(`glob:*/api/v1/report*`, editedReportValues);
-
-    // Mock fetchUISpecificReport from Redux
-    // const makeFetchRequest = () => {
-    //   const request = actions.fetchUISpecificReport(
-    //     mockedProps.user.userId,
-    //     'dashboard_id',
-    //     'dashboards',
-    //     mockedProps.dashboardInfo.id,
-    //   );
-    //   return request(dispatch);
-    // };
-
-    // makeFetchRequest();
-
-    dispatch(actions.setReport(editedReportValues));
-
-    // ---------- Begin tests ----------
-    // Click calendar icon to open email report modal
-    const emailReportModalButton = screen.getByRole('button', {
-      name: /schedule email report/i,
-    });
-    userEvent.click(emailReportModalButton);
-
-    const nameTextbox = screen.getByTestId('report-name-test');
-    userEvent.type(nameTextbox, ' edit');
-
-    const saveButton = screen.getByRole('button', { name: /save/i });
-    userEvent.click(saveButton);
-
-    // TODO (lyndsiWilliams): There should be a report in state at this porint,
-    // which would render the HeaderReportActionsDropDown under the calendar icon
-    // BLOCKER: I cannot get report to populate, as its data is handled through redux
-    expect.anything();
-  });
+test('should render MetadataBar when not in edit mode and not embedded', () => {
+  const state = {
+    dashboardInfo: {
+      ...initialState.dashboardInfo,
+      userId: '123',
+    },
+  };
+  setup(state);
+  expect(
+    screen.getByText(state.dashboardInfo.changed_on_delta_humanized),
+  ).toBeInTheDocument();
 });

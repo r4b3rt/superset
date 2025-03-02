@@ -167,10 +167,10 @@ export default {
     column_types: [0, 1, 2],
     id,
     granularity_sqla: [['ds', 'ds']],
+    main_dttm_col: 'ds',
     name: 'birth_names',
     owners: [{ first_name: 'joe', last_name: 'man', id: 1 }],
     database: {
-      allow_multi_schema_metadata_fetch: null,
       name: 'main',
       backend: 'sqlite',
     },
@@ -199,6 +199,5 @@ export default {
       ['["num_girls", false]', 'num_girls [desc]'],
     ],
     type: 'table',
-    edit_url: '/tablemodelview/edit/7',
   },
 };

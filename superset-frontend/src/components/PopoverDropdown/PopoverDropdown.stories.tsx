@@ -16,15 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import PopoverDropdown, { PopoverDropdownProps, OptionProps } from '.';
 
-export default {
-  title: 'PopoverDropdown',
-  includeStories: ['InteractivePopoverDropdown'],
-};
-
-export const OPTIONS: OptionProps[] = [
+const OPTIONS: OptionProps[] = [
   { label: 'Option A', value: 'A' },
   { label: 'Option B', value: 'B' },
   { label: 'Option C', value: 'C' },
@@ -41,19 +36,18 @@ export const InteractivePopoverDropdown = (props: Props) => {
   const { value, buttonType, optionType, ...rest } = props;
   const [currentValue, setCurrentValue] = useState(value);
 
-  const newElementHandler = (type: ElementType) => ({
-    label,
-    value,
-  }: OptionProps) => {
-    if (type === 'button') {
-      return (
-        <button type="button" key={value}>
-          {label}
-        </button>
-      );
-    }
-    return <span>{label}</span>;
-  };
+  const newElementHandler =
+    (type: ElementType) =>
+    ({ label, value }: OptionProps) => {
+      if (type === 'button') {
+        return (
+          <button type="button" key={value}>
+            {label}
+          </button>
+        );
+      }
+      return <span>{label}</span>;
+    };
 
   return (
     <PopoverDropdown
@@ -69,26 +63,27 @@ export const InteractivePopoverDropdown = (props: Props) => {
 InteractivePopoverDropdown.argTypes = {
   buttonType: {
     defaultValue: 'default',
-    control: { type: 'radio', options: ['default', 'button'] },
+    control: { type: 'radio' },
+    options: ['default', 'button'],
   },
   optionType: {
     defaultValue: 'default',
-    control: { type: 'radio', options: ['default', 'button'] },
+    control: { type: 'radio' },
+    options: ['default', 'button'],
   },
   value: {
-    defaultValue: OPTIONS[0].value,
     table: { disable: true },
   },
   options: {
-    defaultValue: OPTIONS,
     table: { disable: true },
   },
 };
 
-InteractivePopoverDropdown.story = {
-  parameters: {
-    knobs: {
-      disable: true,
-    },
+export default {
+  title: 'PopoverDropdown',
+  includeStories: ['InteractivePopoverDropdown'],
+  args: {
+    value: OPTIONS[0].value,
+    options: OPTIONS,
   },
 };

@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import { render, fireEvent, screen } from 'spec/helpers/testing-library';
 import LabeledErrorBoundInput from 'src/components/Form/LabeledErrorBoundInput';
 
@@ -60,13 +59,13 @@ describe('LabeledErrorBoundInput', () => {
     expect(textboxInput).toBeVisible();
     expect(errorText).toBeVisible();
   });
-  it('renders a LabledErrorBoundInput with a InfoTooltip', async () => {
+  it('renders a LabeledErrorBoundInput with a InfoTooltip', async () => {
     defaultProps.hasTooltip = true;
     render(<LabeledErrorBoundInput {...defaultProps} />);
 
     const label = screen.getByText(/username/i);
     const textboxInput = screen.getByRole('textbox');
-    const tooltipIcon = screen.getByRole('img');
+    const tooltipIcon = screen.getAllByRole('img')[0];
 
     fireEvent.mouseOver(tooltipIcon);
 
@@ -74,5 +73,19 @@ describe('LabeledErrorBoundInput', () => {
     expect(label).toBeVisible();
     expect(textboxInput).toBeVisible();
     expect(await screen.findByText('This is a tooltip')).toBeInTheDocument();
+  });
+
+  it('becomes a password input if visibilityToggle prop is passed in', async () => {
+    defaultProps.visibilityToggle = true;
+    render(<LabeledErrorBoundInput {...defaultProps} />);
+
+    expect(await screen.findByTestId('icon-eye')).toBeVisible();
+  });
+
+  it('becomes a password input if props.name === password (backwards compatibility)', async () => {
+    defaultProps.name = 'password';
+    render(<LabeledErrorBoundInput {...defaultProps} />);
+
+    expect(await screen.findByTestId('icon-eye')).toBeVisible();
   });
 });

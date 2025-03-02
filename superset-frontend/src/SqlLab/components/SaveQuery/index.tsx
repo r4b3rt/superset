@@ -16,13 +16,45 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useState } from 'react';
-import { Row, Col, Input, TextArea } from 'src/common/components';
+import { useState, useEffect, useMemo, ChangeEvent } from 'react';
+
+import type { DatabaseObject } from 'src/features/databases/types';
+import { Row, Col } from 'src/components';
+import { Input, TextArea } from 'src/components/Input';
 import { t, styled } from '@superset-ui/core';
 import Button from 'src/components/Button';
+import { Menu } from 'src/components/Menu';
 import { Form, FormItem } from 'src/components/Form';
 import Modal from 'src/components/Modal';
-import Icons from 'src/components/Icons';
+import SaveDatasetActionButton from 'src/SqlLab/components/SaveDatasetActionButton';
+import {
+  SaveDatasetModal,
+  ISaveableDatasource,
+} from 'src/SqlLab/components/SaveDatasetModal';
+import { getDatasourceAsSaveableDataset } from 'src/utils/datasourceUtils';
+import useQueryEditor from 'src/SqlLab/hooks/useQueryEditor';
+import { QueryEditor } from 'src/SqlLab/types';
+import useLogAction from 'src/logger/useLogAction';
+import {
+  LOG_ACTIONS_SQLLAB_CREATE_CHART,
+  LOG_ACTIONS_SQLLAB_SAVE_QUERY,
+} from 'src/logger/LogUtils';
+
+interface SaveQueryProps {
+  queryEditorId: string;
+  columns: ISaveableDatasource['columns'];
+  onSave: (arg0: QueryPayload, id: string) => void;
+  onUpdate: (arg0: QueryPayload, id: string) => void;
+  saveQueryWarning: string | null;
+  database: Partial<DatabaseObject> | undefined;
+}
+
+export type QueryPayload = {
+  name: string;
+  description?: string;
+  id?: string;
+  remoteId?: number;
+} & Pick<QueryEditor, 'dbId' | 'catalog' | 'schema' | 'sql'>;
 
 const Styles = styled.span`
   span[role='img'] {
@@ -36,84 +68,95 @@ const Styles = styled.span`
   }
 `;
 
-interface SaveQueryProps {
-  query: any;
-  defaultLabel: string;
-  onSave: (arg0: QueryPayload) => void;
-  onUpdate: (arg0: QueryPayload) => void;
-  saveQueryWarning: string | null;
-}
-
-type QueryPayload = {
-  autorun: boolean;
-  dbId: number;
-  description?: string;
-  id?: string;
-  latestQueryId: string;
-  queryLimit: number;
-  remoteId: number;
-  schema: string;
-  schemaOptions: Array<{
-    label: string;
-    title: string;
-    value: string;
-  }>;
-  selectedText: string | null;
-  sql: string;
-  tableOptions: Array<{
-    label: string;
-    schema: string;
-    title: string;
-    type: string;
-    value: string;
-  }>;
-  title: string;
-};
-
-export default function SaveQuery({
-  query,
-  defaultLabel = t('Undefined'),
+const SaveQuery = ({
+  queryEditorId,
   onSave = () => {},
   onUpdate,
-  saveQueryWarning = null,
-}: SaveQueryProps) {
+  saveQueryWarning,
+  database,
+  columns,
+}: SaveQueryProps) => {
+  const queryEditor = useQueryEditor(queryEditorId, [
+    'autorun',
+    'name',
+    'description',
+    'remoteId',
+    'dbId',
+    'latestQueryId',
+    'queryLimit',
+    'catalog',
+    'schema',
+    'selectedText',
+    'sql',
+    'templateParams',
+  ]);
+  const query = useMemo(
+    () => ({
+      ...queryEditor,
+      columns,
+    }),
+    [queryEditor, columns],
+  );
+  const logAction = useLogAction({ queryEditorId });
+  const defaultLabel = query.name || query.description || t('Undefined');
   const [description, setDescription] = useState<string>(
     query.description || '',
   );
   const [label, setLabel] = useState<string>(defaultLabel);
   const [showSave, setShowSave] = useState<boolean>(false);
+  const [showSaveDatasetModal, setShowSaveDatasetModal] = useState(false);
   const isSaved = !!query.remoteId;
+  const canExploreDatabase = !!database?.allows_virtual_table_explore;
+  const shouldShowSaveButton =
+    database?.allows_virtual_table_explore !== undefined;
+
+  const overlayMenu = (
+    <Menu>
+      <Menu.Item
+        onClick={() => {
+          logAction(LOG_ACTIONS_SQLLAB_CREATE_CHART, {});
+          setShowSaveDatasetModal(true);
+        }}
+      >
+        {t('Save dataset')}
+      </Menu.Item>
+    </Menu>
+  );
 
   const queryPayload = () => ({
-    ...query,
-    title: label,
+    name: label,
     description,
+    dbId: query.dbId ?? 0,
+    sql: query.sql,
+    catalog: query.catalog,
+    schema: query.schema,
+    templateParams: query.templateParams,
+    remoteId: query?.remoteId || undefined,
   });
 
-  const close = () => {
-    setShowSave(false);
-  };
+  useEffect(() => {
+    if (!isSaved) setLabel(defaultLabel);
+  }, [defaultLabel]);
+
+  const close = () => setShowSave(false);
 
   const onSaveWrapper = () => {
-    onSave(queryPayload());
+    logAction(LOG_ACTIONS_SQLLAB_SAVE_QUERY, {});
+    onSave(queryPayload(), query.id);
     close();
   };
 
   const onUpdateWrapper = () => {
-    onUpdate(queryPayload());
+    onUpdate(queryPayload(), query.id);
     close();
   };
 
-  const onLabelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onLabelChange = (e: ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
   };
 
-  const onDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const onDescriptionChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setDescription(e.target.value);
-  };
-
-  const toggleSave = () => {
-    setShowSave(!showSave);
   };
 
   const renderModalBody = () => (
@@ -155,10 +198,19 @@ export default function SaveQuery({
 
   return (
     <Styles className="SaveQuery">
-      <Button buttonSize="small" onClick={toggleSave}>
-        <Icons.Save iconSize="xl" />
-        {isSaved ? t('Save') : t('Save as')}
-      </Button>
+      {shouldShowSaveButton && (
+        <SaveDatasetActionButton
+          setShowSave={setShowSave}
+          overlayMenu={canExploreDatabase ? overlayMenu : null}
+        />
+      )}
+      <SaveDatasetModal
+        visible={showSaveDatasetModal}
+        onHide={() => setShowSaveDatasetModal(false)}
+        buttonTextOnSave={t('Save & Explore')}
+        buttonTextOnOverwrite={t('Overwrite & Explore')}
+        datasource={getDatasourceAsSaveableDataset(query)}
+      />
       <Modal
         className="save-query-modal"
         onHandledPrimaryAction={onSaveWrapper}
@@ -167,7 +219,7 @@ export default function SaveQuery({
         width="620px"
         show={showSave}
         title={<h4>{t('Save query')}</h4>}
-        footer={[
+        footer={
           <>
             <Button onClick={close} data-test="cancel-query" cta>
               {t('Cancel')}
@@ -190,11 +242,13 @@ export default function SaveQuery({
                 {t('Update')}
               </Button>
             )}
-          </>,
-        ]}
+          </>
+        }
       >
         {renderModalBody()}
       </Modal>
     </Styles>
   );
-}
+};
+
+export default SaveQuery;

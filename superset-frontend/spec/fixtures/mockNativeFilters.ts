@@ -16,13 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { ExtraFormData } from '@superset-ui/core';
-import { NativeFilterType } from 'src/dashboard/components/nativeFilters/types';
-import { NativeFiltersState } from 'src/dashboard/reducers/types';
-import { DataMaskStateWithId } from '../../src/dataMask/types';
+import {
+  DataMaskStateWithId,
+  ExtraFormData,
+  NativeFiltersState,
+  NativeFilterType,
+} from '@superset-ui/core';
 
 export const nativeFilters: NativeFiltersState = {
-  filterSets: {},
   filters: {
     'NATIVE_FILTER-e7Q8zKixx': {
       id: 'NATIVE_FILTER-e7Q8zKixx',
@@ -51,8 +52,9 @@ export const nativeFilters: NativeFiltersState = {
         enableEmptyFilter: false,
         inverseSelection: false,
       },
-      type: NativeFilterType.NATIVE_FILTER,
+      type: NativeFilterType.NativeFilter,
       description: '',
+      chartsInScope: [18],
     },
     'NATIVE_FILTER-x9QPw0so1': {
       id: 'NATIVE_FILTER-x9QPw0so1',
@@ -81,8 +83,9 @@ export const nativeFilters: NativeFiltersState = {
         enableEmptyFilter: false,
         inverseSelection: false,
       },
-      type: NativeFilterType.NATIVE_FILTER,
+      type: NativeFilterType.NativeFilter,
       description: '2 letter code',
+      chartsInScope: [18],
     },
   },
 };
@@ -130,6 +133,7 @@ export const singleNativeFiltersState = {
       id: [NATIVE_FILTER_ID],
       name: 'eth',
       type: 'text',
+      filterType: 'filter_select',
       targets: [{ datasetId: 13, column: { name: 'ethnic_minority' } }],
       defaultDataMask: {
         filterState: {
@@ -141,6 +145,7 @@ export const singleNativeFiltersState = {
       inverseSelection: false,
       allowsMultipleValues: false,
       isRequired: false,
+      chartsInScope: [230],
     },
   },
 };
@@ -454,7 +459,7 @@ export const mockQueryDataForCountries = [
 export const buildNativeFilter = (
   id: string,
   name: string,
-  parents: string[],
+  dependencies: string[],
 ) => ({
   id,
   controlValues: {
@@ -479,7 +484,7 @@ export const buildNativeFilter = (
     filterState: {},
     ownState: {},
   },
-  cascadeParentIds: parents,
+  cascadeParentIds: dependencies,
   scope: {
     rootPath: ['ROOT_ID'],
     excluded: [],

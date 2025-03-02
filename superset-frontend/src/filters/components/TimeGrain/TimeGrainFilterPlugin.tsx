@@ -23,7 +23,7 @@ import {
   TimeGranularity,
   tn,
 } from '@superset-ui/core';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Select } from 'src/components';
 import { FormItemProps } from 'antd/lib/form';
 import { FilterPluginStyle, StyledFormItem, StatusMessage } from '../common';
@@ -38,11 +38,15 @@ export default function PluginFilterTimegrain(
     height,
     width,
     setDataMask,
+    setHoveredFilter,
+    unsetHoveredFilter,
     setFocusedFilter,
     unsetFocusedFilter,
+    setFilterActive,
     filterState,
+    inputRef,
   } = props;
-  const { defaultValue, inputRef } = formData;
+  const { defaultValue } = formData;
 
   const [value, setValue] = useState<string[]>(defaultValue ?? []);
   const durationMap = useMemo(
@@ -117,15 +121,19 @@ export default function PluginFilterTimegrain(
         {...formItemData}
       >
         <Select
+          name={formData.nativeFilterId}
           allowClear
           value={value}
           placeholder={placeholderText}
           // @ts-ignore
           onChange={handleChange}
-          onMouseEnter={setFocusedFilter}
-          onMouseLeave={unsetFocusedFilter}
+          onBlur={unsetFocusedFilter}
+          onFocus={setFocusedFilter}
+          onMouseEnter={setHoveredFilter}
+          onMouseLeave={unsetHoveredFilter}
           ref={inputRef}
           options={options}
+          onDropdownVisibleChange={setFilterActive}
         />
       </StyledFormItem>
     </FilterPluginStyle>

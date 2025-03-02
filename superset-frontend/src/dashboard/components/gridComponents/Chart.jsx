@@ -17,30 +17,47 @@
  * under the License.
  */
 import cx from 'classnames';
-import React from 'react';
+import { useCallback, useEffect, useRef, useMemo, useState, memo } from 'react';
 import PropTypes from 'prop-types';
-import { styled } from '@superset-ui/core';
-import { isEqual } from 'lodash';
+import { styled, t, logging } from '@superset-ui/core';
+import { debounce } from 'lodash';
+import { useHistory } from 'react-router-dom';
+import { bindActionCreators } from 'redux';
+import { useDispatch, useSelector } from 'react-redux';
 
-import {
-  exportChart,
-  getExploreUrlFromDashboard,
-} from 'src/explore/exploreUtils';
-import ChartContainer from 'src/chart/ChartContainer';
+import { exportChart, mountExploreUrl } from 'src/explore/exploreUtils';
+import ChartContainer from 'src/components/Chart/ChartContainer';
 import {
   LOG_ACTIONS_CHANGE_DASHBOARD_FILTER,
   LOG_ACTIONS_EXPLORE_DASHBOARD_CHART,
   LOG_ACTIONS_EXPORT_CSV_DASHBOARD_CHART,
+  LOG_ACTIONS_EXPORT_XLSX_DASHBOARD_CHART,
   LOG_ACTIONS_FORCE_REFRESH_CHART,
 } from 'src/logger/LogUtils';
-import { areObjectsEqual } from 'src/reduxUtils';
+import { postFormData } from 'src/explore/exploreUtils/formData';
+import { URL_PARAMS } from 'src/constants';
+import { enforceSharedLabelsColorsArray } from 'src/utils/colorScheme';
 
 import SliceHeader from '../SliceHeader';
 import MissingChart from '../MissingChart';
-import { slicePropShape, chartPropShape } from '../../util/propShapes';
-
-import { isFilterBox } from '../../util/activeDashboardFilters';
-import getFilterValuesByFilterId from '../../util/getFilterValuesByFilterId';
+import {
+  addDangerToast,
+  addSuccessToast,
+} from '../../../components/MessageToasts/actions';
+import {
+  setFocusedFilterField,
+  toggleExpandSlice,
+  unsetFocusedFilterField,
+} from '../../actions/dashboardState';
+import { changeFilter } from '../../actions/dashboardFilters';
+import { refreshChart } from '../../../components/Chart/chartAction';
+import { logEvent } from '../../../logger/actions';
+import {
+  getActiveFilters,
+  getAppliedFilterValues,
+} from '../../util/activeDashboardFilters';
+import getFormDataWithExtraFilters from '../../util/charts/getFormDataWithExtraFilters';
+import { PLACEHOLDER_DATASOURCE } from '../../constants';
 
 const propTypes = {
   id: PropTypes.number.isRequired,
@@ -51,51 +68,26 @@ const propTypes = {
   updateSliceName: PropTypes.func.isRequired,
   isComponentVisible: PropTypes.bool,
   handleToggleFullSize: PropTypes.func.isRequired,
-
-  // from redux
-  chart: chartPropShape.isRequired,
-  formData: PropTypes.object.isRequired,
-  labelColors: PropTypes.object,
-  datasource: PropTypes.object,
-  slice: slicePropShape.isRequired,
+  setControlValue: PropTypes.func,
   sliceName: PropTypes.string.isRequired,
-  timeout: PropTypes.number.isRequired,
-  maxRows: PropTypes.number.isRequired,
-  // all active filter fields in dashboard
-  filters: PropTypes.object.isRequired,
-  refreshChart: PropTypes.func.isRequired,
-  logEvent: PropTypes.func.isRequired,
-  toggleExpandSlice: PropTypes.func.isRequired,
-  changeFilter: PropTypes.func.isRequired,
-  setFocusedFilterField: PropTypes.func.isRequired,
-  unsetFocusedFilterField: PropTypes.func.isRequired,
-  editMode: PropTypes.bool.isRequired,
-  isExpanded: PropTypes.bool.isRequired,
-  isCached: PropTypes.bool,
-  supersetCanExplore: PropTypes.bool.isRequired,
-  supersetCanShare: PropTypes.bool.isRequired,
-  supersetCanCSV: PropTypes.bool.isRequired,
-  sliceCanEdit: PropTypes.bool.isRequired,
-  addSuccessToast: PropTypes.func.isRequired,
-  addDangerToast: PropTypes.func.isRequired,
-  ownState: PropTypes.object,
-  filterState: PropTypes.object,
-};
-
-const defaultProps = {
-  isCached: false,
-  isComponentVisible: true,
+  isFullSize: PropTypes.bool,
+  extraControls: PropTypes.object,
+  isInView: PropTypes.bool,
 };
 
 // we use state + shouldComponentUpdate() logic to prevent perf-wrecking
 // resizing across all slices on a dashboard on every update
-const RESIZE_TIMEOUT = 350;
-const SHOULD_UPDATE_ON_PROP_CHANGES = Object.keys(propTypes).filter(
-  prop =>
-    prop !== 'width' && prop !== 'height' && prop !== 'isComponentVisible',
-);
-const OVERFLOWABLE_VIZ_TYPES = new Set(['filter_box']);
+const RESIZE_TIMEOUT = 500;
 const DEFAULT_HEADER_HEIGHT = 22;
+
+const ChartWrapper = styled.div`
+  overflow: hidden;
+  position: relative;
+
+  &.dashboard-chart--overflowable {
+    overflow: visible;
+  }
+`;
 
 const ChartOverlay = styled.div`
   position: absolute;
@@ -104,316 +96,463 @@ const ChartOverlay = styled.div`
   z-index: 5;
 `;
 
-export default class Chart extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = {
-      width: props.width,
-      height: props.height,
-      descriptionHeight: 0,
-    };
+const SliceContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+`;
 
-    this.changeFilter = this.changeFilter.bind(this);
-    this.handleFilterMenuOpen = this.handleFilterMenuOpen.bind(this);
-    this.handleFilterMenuClose = this.handleFilterMenuClose.bind(this);
-    this.exportCSV = this.exportCSV.bind(this);
-    this.exportFullCSV = this.exportFullCSV.bind(this);
-    this.forceRefresh = this.forceRefresh.bind(this);
-    this.resize = this.resize.bind(this);
-    this.setDescriptionRef = this.setDescriptionRef.bind(this);
-    this.setHeaderRef = this.setHeaderRef.bind(this);
-  }
+const EMPTY_OBJECT = {};
 
-  shouldComponentUpdate(nextProps, nextState) {
-    // this logic mostly pertains to chart resizing. we keep a copy of the dimensions in
-    // state so that we can buffer component size updates and only update on the final call
-    // which improves performance significantly
-    if (
-      nextState.width !== this.state.width ||
-      nextState.height !== this.state.height ||
-      nextState.descriptionHeight !== this.state.descriptionHeight ||
-      !isEqual(nextProps.datasource, this.props.datasource)
-    ) {
-      return true;
-    }
+const Chart = props => {
+  const dispatch = useDispatch();
+  const descriptionRef = useRef(null);
+  const headerRef = useRef(null);
 
-    // allow chart update/re-render only if visible:
-    // under selected tab or no tab layout
-    if (nextProps.isComponentVisible) {
-      if (nextProps.chart.triggerQuery) {
-        return true;
-      }
+  const boundActionCreators = useMemo(
+    () =>
+      bindActionCreators(
+        {
+          addSuccessToast,
+          addDangerToast,
+          toggleExpandSlice,
+          changeFilter,
+          setFocusedFilterField,
+          unsetFocusedFilterField,
+          refreshChart,
+          logEvent,
+        },
+        dispatch,
+      ),
+    [dispatch],
+  );
 
-      if (nextProps.isFullSize !== this.props.isFullSize) {
-        clearTimeout(this.resizeTimeout);
-        this.resizeTimeout = setTimeout(this.resize, RESIZE_TIMEOUT);
-        return false;
-      }
+  const chart = useSelector(state => state.charts[props.id] || EMPTY_OBJECT);
+  const slice = useSelector(
+    state => state.sliceEntities.slices[props.id] || EMPTY_OBJECT,
+  );
+  const editMode = useSelector(state => state.dashboardState.editMode);
+  const isExpanded = useSelector(
+    state => !!state.dashboardState.expandedSlices[props.id],
+  );
+  const supersetCanExplore = useSelector(
+    state => !!state.dashboardInfo.superset_can_explore,
+  );
+  const supersetCanShare = useSelector(
+    state => !!state.dashboardInfo.superset_can_share,
+  );
+  const supersetCanCSV = useSelector(
+    state => !!state.dashboardInfo.superset_can_csv,
+  );
+  const timeout = useSelector(
+    state => state.dashboardInfo.common.conf.SUPERSET_WEBSERVER_TIMEOUT,
+  );
+  const emitCrossFilters = useSelector(
+    state => !!state.dashboardInfo.crossFiltersEnabled,
+  );
+  const datasource = useSelector(
+    state =>
+      (chart &&
+        chart.form_data &&
+        state.datasources[chart.form_data.datasource]) ||
+      PLACEHOLDER_DATASOURCE,
+  );
 
-      if (
-        nextProps.width !== this.props.width ||
-        nextProps.height !== this.props.height
-      ) {
-        clearTimeout(this.resizeTimeout);
-        this.resizeTimeout = setTimeout(this.resize, RESIZE_TIMEOUT);
-      }
+  const [descriptionHeight, setDescriptionHeight] = useState(0);
+  const [height, setHeight] = useState(props.height);
+  const [width, setWidth] = useState(props.width);
+  const history = useHistory();
+  const resize = useCallback(
+    debounce(() => {
+      const { width, height } = props;
+      setHeight(height);
+      setWidth(width);
+    }, RESIZE_TIMEOUT),
+    [props.width, props.height],
+  );
 
-      for (let i = 0; i < SHOULD_UPDATE_ON_PROP_CHANGES.length; i += 1) {
-        const prop = SHOULD_UPDATE_ON_PROP_CHANGES[i];
-        // use deep objects equality comparison to prevent
-        // unneccessary updates when objects references change
-        if (!areObjectsEqual(nextProps[prop], this.props[prop])) {
-          return true;
-        }
-      }
-    }
+  const ownColorScheme = chart.form_data?.color_scheme;
 
-    // `cacheBusterProp` is jected by react-hot-loader
-    return this.props.cacheBusterProp !== nextProps.cacheBusterProp;
-  }
+  const addFilter = useCallback(
+    (newSelectedValues = {}) => {
+      boundActionCreators.logEvent(LOG_ACTIONS_CHANGE_DASHBOARD_FILTER, {
+        id: chart.id,
+        columns: Object.keys(newSelectedValues).filter(
+          key => newSelectedValues[key] !== null,
+        ),
+      });
+      boundActionCreators.changeFilter(chart.id, newSelectedValues);
+    },
+    [boundActionCreators.logEvent, boundActionCreators.changeFilter, chart.id],
+  );
 
-  componentWillUnmount() {
-    clearTimeout(this.resizeTimeout);
-  }
-
-  componentDidUpdate(prevProps) {
-    if (this.props.isExpanded !== prevProps.isExpanded) {
+  useEffect(() => {
+    if (isExpanded) {
       const descriptionHeight =
-        this.props.isExpanded && this.descriptionRef
-          ? this.descriptionRef.offsetHeight
+        isExpanded && descriptionRef.current
+          ? descriptionRef.current?.offsetHeight
           : 0;
-      // eslint-disable-next-line react/no-did-update-set-state
-      this.setState({ descriptionHeight });
+      setDescriptionHeight(descriptionHeight);
     }
-  }
+  }, [isExpanded]);
 
-  getChartHeight() {
-    const headerHeight = this.getHeaderHeight();
-    return this.state.height - headerHeight - this.state.descriptionHeight;
-  }
+  useEffect(
+    () => () => {
+      resize.cancel();
+    },
+    [resize],
+  );
 
-  getHeaderHeight() {
-    return (
-      (this.headerRef && this.headerRef.offsetHeight) || DEFAULT_HEADER_HEIGHT
-    );
-  }
+  useEffect(() => {
+    resize();
+  }, [resize, props.isFullSize]);
 
-  setDescriptionRef(ref) {
-    this.descriptionRef = ref;
-  }
+  const getHeaderHeight = useCallback(() => {
+    if (headerRef.current) {
+      const computedStyle = getComputedStyle(
+        headerRef.current,
+      ).getPropertyValue('margin-bottom');
+      const marginBottom = parseInt(computedStyle, 10) || 0;
+      return headerRef.current.offsetHeight + marginBottom;
+    }
+    return DEFAULT_HEADER_HEIGHT;
+  }, [headerRef]);
 
-  setHeaderRef(ref) {
-    this.headerRef = ref;
-  }
+  const getChartHeight = useCallback(() => {
+    const headerHeight = getHeaderHeight();
+    return Math.max(height - headerHeight - descriptionHeight, 20);
+  }, [getHeaderHeight, height, descriptionHeight]);
 
-  resize() {
-    const { width, height } = this.props;
-    this.setState(() => ({ width, height }));
-  }
+  const handleFilterMenuOpen = useCallback(
+    (chartId, column) => {
+      boundActionCreators.setFocusedFilterField(chartId, column);
+    },
+    [boundActionCreators.setFocusedFilterField],
+  );
 
-  changeFilter(newSelectedValues = {}) {
-    this.props.logEvent(LOG_ACTIONS_CHANGE_DASHBOARD_FILTER, {
-      id: this.props.chart.id,
-      columns: Object.keys(newSelectedValues),
+  const handleFilterMenuClose = useCallback(
+    (chartId, column) => {
+      boundActionCreators.unsetFocusedFilterField(chartId, column);
+    },
+    [boundActionCreators.unsetFocusedFilterField],
+  );
+
+  const logExploreChart = useCallback(() => {
+    boundActionCreators.logEvent(LOG_ACTIONS_EXPLORE_DASHBOARD_CHART, {
+      slice_id: slice.slice_id,
+      is_cached: props.isCached,
     });
-    this.props.changeFilter(this.props.chart.id, newSelectedValues);
-  }
+  }, [boundActionCreators.logEvent, slice.slice_id, props.isCached]);
 
-  handleFilterMenuOpen(chartId, column) {
-    this.props.setFocusedFilterField(chartId, column);
-  }
+  const chartConfiguration = useSelector(
+    state => state.dashboardInfo.metadata?.chart_configuration,
+  );
+  const colorScheme = useSelector(state => state.dashboardState.colorScheme);
+  const colorNamespace = useSelector(
+    state => state.dashboardState.colorNamespace,
+  );
+  const datasetsStatus = useSelector(
+    state => state.dashboardState.datasetsStatus,
+  );
+  const allSliceIds = useSelector(state => state.dashboardState.sliceIds);
+  const nativeFilters = useSelector(state => state.nativeFilters?.filters);
+  const dataMask = useSelector(state => state.dataMask);
+  const labelsColor = useSelector(
+    state => state.dashboardInfo?.metadata?.label_colors || EMPTY_OBJECT,
+  );
+  const labelsColorMap = useSelector(
+    state => state.dashboardInfo?.metadata?.map_label_colors || EMPTY_OBJECT,
+  );
+  const sharedLabelsColors = useSelector(state =>
+    enforceSharedLabelsColorsArray(
+      state.dashboardInfo?.metadata?.shared_label_colors,
+    ),
+  );
 
-  handleFilterMenuClose(chartId, column) {
-    this.props.unsetFocusedFilterField(chartId, column);
-  }
-
-  logExploreChart = () => {
-    this.props.logEvent(LOG_ACTIONS_EXPLORE_DASHBOARD_CHART, {
-      slice_id: this.props.slice.slice_id,
-      is_cached: this.props.isCached,
-    });
-  };
-
-  getChartUrl = () => getExploreUrlFromDashboard(this.props.formData);
-
-  exportCSV(isFullCSV = false) {
-    this.props.logEvent(LOG_ACTIONS_EXPORT_CSV_DASHBOARD_CHART, {
-      slice_id: this.props.slice.slice_id,
-      is_cached: this.props.isCached,
-    });
-    exportChart({
-      formData: isFullCSV
-        ? { ...this.props.formData, row_limit: this.props.maxRows }
-        : this.props.formData,
-      resultType: 'results',
-      resultFormat: 'csv',
-    });
-  }
-
-  exportFullCSV() {
-    this.exportCSV(true);
-  }
-
-  forceRefresh() {
-    this.props.logEvent(LOG_ACTIONS_FORCE_REFRESH_CHART, {
-      slice_id: this.props.slice.slice_id,
-      is_cached: this.props.isCached,
-    });
-    return this.props.refreshChart(
-      this.props.chart.id,
-      true,
-      this.props.dashboardId,
-    );
-  }
-
-  render() {
-    const {
-      id,
-      componentId,
-      dashboardId,
+  const formData = useMemo(
+    () =>
+      getFormDataWithExtraFilters({
+        chart,
+        chartConfiguration,
+        filters: getAppliedFilterValues(props.id),
+        colorScheme,
+        colorNamespace,
+        sliceId: props.id,
+        nativeFilters,
+        allSliceIds,
+        dataMask,
+        extraControls: props.extraControls,
+        labelsColor,
+        labelsColorMap,
+        sharedLabelsColors,
+        ownColorScheme,
+      }),
+    [
       chart,
-      slice,
-      datasource,
-      isExpanded,
-      editMode,
-      filters,
+      chartConfiguration,
+      props.id,
+      props.extraControls,
+      colorScheme,
+      colorNamespace,
+      nativeFilters,
+      allSliceIds,
+      dataMask,
+      labelsColor,
+      labelsColorMap,
+      sharedLabelsColors,
+      ownColorScheme,
+    ],
+  );
+
+  const onExploreChart = useCallback(
+    async clickEvent => {
+      const isOpenInNewTab =
+        clickEvent.shiftKey || clickEvent.ctrlKey || clickEvent.metaKey;
+      try {
+        const lastTabId = window.localStorage.getItem('last_tab_id');
+        const nextTabId = lastTabId
+          ? String(Number.parseInt(lastTabId, 10) + 1)
+          : undefined;
+        const key = await postFormData(
+          datasource.id,
+          datasource.type,
+          formData,
+          slice.slice_id,
+          nextTabId,
+        );
+        const url = mountExploreUrl(null, {
+          [URL_PARAMS.formDataKey.name]: key,
+          [URL_PARAMS.sliceId.name]: slice.slice_id,
+        });
+        if (isOpenInNewTab) {
+          window.open(url, '_blank', 'noreferrer');
+        } else {
+          history.push(url);
+        }
+      } catch (error) {
+        logging.error(error);
+        boundActionCreators.addDangerToast(
+          t('An error occurred while opening Explore'),
+        );
+      }
+    },
+    [
+      datasource.id,
+      datasource.type,
       formData,
-      labelColors,
-      updateSliceName,
-      sliceName,
-      toggleExpandSlice,
-      timeout,
-      supersetCanExplore,
-      supersetCanShare,
-      supersetCanCSV,
-      sliceCanEdit,
-      addSuccessToast,
-      addDangerToast,
-      ownState,
-      filterState,
-      handleToggleFullSize,
-      isFullSize,
-    } = this.props;
+      slice.slice_id,
+      boundActionCreators.addDangerToast,
+      history,
+    ],
+  );
 
-    const { width } = this.state;
-    // this prevents throwing in the case that a gridComponent
-    // references a chart that is not associated with the dashboard
-    if (!chart || !slice) {
-      return <MissingChart height={this.getChartHeight()} />;
-    }
+  const exportTable = useCallback(
+    (format, isFullCSV, isPivot = false) => {
+      const logAction =
+        format === 'csv'
+          ? LOG_ACTIONS_EXPORT_CSV_DASHBOARD_CHART
+          : LOG_ACTIONS_EXPORT_XLSX_DASHBOARD_CHART;
+      boundActionCreators.logEvent(logAction, {
+        slice_id: slice.slice_id,
+        is_cached: props.isCached,
+      });
+      exportChart({
+        formData: isFullCSV
+          ? { ...formData, row_limit: props.maxRows }
+          : formData,
+        resultType: isPivot ? 'post_processed' : 'full',
+        resultFormat: format,
+        force: true,
+        ownState: props.ownState,
+      });
+    },
+    [
+      slice.slice_id,
+      props.isCached,
+      formData,
+      props.maxRows,
+      props.ownState,
+      boundActionCreators.logEvent,
+    ],
+  );
 
-    const { queriesResponse, chartUpdateEndTime, chartStatus } = chart;
-    const isLoading = chartStatus === 'loading';
+  const exportCSV = useCallback(
+    (isFullCSV = false) => {
+      exportTable('csv', isFullCSV);
+    },
+    [exportTable],
+  );
+
+  const exportFullCSV = useCallback(() => {
+    exportCSV(true);
+  }, [exportCSV]);
+
+  const exportPivotCSV = useCallback(() => {
+    exportTable('csv', false, true);
+  }, [exportTable]);
+
+  const exportXLSX = useCallback(() => {
+    exportTable('xlsx', false);
+  }, [exportTable]);
+
+  const exportFullXLSX = useCallback(() => {
+    exportTable('xlsx', true);
+  }, [exportTable]);
+
+  const forceRefresh = useCallback(() => {
+    boundActionCreators.logEvent(LOG_ACTIONS_FORCE_REFRESH_CHART, {
+      slice_id: slice.slice_id,
+      is_cached: props.isCached,
+    });
+    return boundActionCreators.refreshChart(chart.id, true, props.dashboardId);
+  }, [
+    boundActionCreators.refreshChart,
+    chart.id,
+    props.dashboardId,
+    slice.slice_id,
+    props.isCached,
+    boundActionCreators.logEvent,
+  ]);
+
+  if (chart === EMPTY_OBJECT || slice === EMPTY_OBJECT) {
+    return <MissingChart height={getChartHeight()} />;
+  }
+
+  const { queriesResponse, chartUpdateEndTime, chartStatus, annotationQuery } =
+    chart;
+  const isLoading = chartStatus === 'loading';
+  // eslint-disable-next-line camelcase
+  const isCached = queriesResponse?.map(({ is_cached }) => is_cached) || [];
+  const cachedDttm =
     // eslint-disable-next-line camelcase
-    const isCached = queriesResponse?.map(({ is_cached }) => is_cached) || [];
-    const cachedDttm =
-      // eslint-disable-next-line camelcase
-      queriesResponse?.map(({ cached_dttm }) => cached_dttm) || [];
-    const isOverflowable = OVERFLOWABLE_VIZ_TYPES.has(slice.viz_type);
-    const initialValues = isFilterBox(id)
-      ? getFilterValuesByFilterId({
-          activeFilters: filters,
-          filterId: id,
-        })
-      : {};
-    return (
-      <div
-        className="chart-slice"
-        data-test="chart-grid-component"
-        data-test-chart-id={id}
-        data-test-viz-type={slice.viz_type}
-        data-test-chart-name={slice.slice_name}
-      >
-        <SliceHeader
-          innerRef={this.setHeaderRef}
-          slice={slice}
-          isExpanded={!!isExpanded}
-          isCached={isCached}
-          cachedDttm={cachedDttm}
-          updatedDttm={chartUpdateEndTime}
-          toggleExpandSlice={toggleExpandSlice}
-          forceRefresh={this.forceRefresh}
-          editMode={editMode}
-          annotationQuery={chart.annotationQuery}
-          logExploreChart={this.logExploreChart}
-          exploreUrl={this.getChartUrl()}
-          exportCSV={this.exportCSV}
-          exportFullCSV={this.exportFullCSV}
-          updateSliceName={updateSliceName}
-          sliceName={sliceName}
-          supersetCanExplore={supersetCanExplore}
-          supersetCanShare={supersetCanShare}
-          supersetCanCSV={supersetCanCSV}
-          sliceCanEdit={sliceCanEdit}
-          componentId={componentId}
-          dashboardId={dashboardId}
-          filters={filters}
-          addSuccessToast={addSuccessToast}
-          addDangerToast={addDangerToast}
-          handleToggleFullSize={handleToggleFullSize}
-          isFullSize={isFullSize}
-          chartStatus={chart.chartStatus}
-          formData={formData}
-        />
+    queriesResponse?.map(({ cached_dttm }) => cached_dttm) || [];
 
-        {/*
+  return (
+    <SliceContainer
+      className="chart-slice"
+      data-test="chart-grid-component"
+      data-test-chart-id={props.id}
+      data-test-viz-type={slice.viz_type}
+      data-test-chart-name={slice.slice_name}
+    >
+      <SliceHeader
+        ref={headerRef}
+        slice={slice}
+        isExpanded={isExpanded}
+        isCached={isCached}
+        cachedDttm={cachedDttm}
+        updatedDttm={chartUpdateEndTime}
+        toggleExpandSlice={boundActionCreators.toggleExpandSlice}
+        forceRefresh={forceRefresh}
+        editMode={editMode}
+        annotationQuery={annotationQuery}
+        logExploreChart={logExploreChart}
+        logEvent={boundActionCreators.logEvent}
+        onExploreChart={onExploreChart}
+        exportCSV={exportCSV}
+        exportPivotCSV={exportPivotCSV}
+        exportXLSX={exportXLSX}
+        exportFullCSV={exportFullCSV}
+        exportFullXLSX={exportFullXLSX}
+        updateSliceName={props.updateSliceName}
+        sliceName={props.sliceName}
+        supersetCanExplore={supersetCanExplore}
+        supersetCanShare={supersetCanShare}
+        supersetCanCSV={supersetCanCSV}
+        componentId={props.componentId}
+        dashboardId={props.dashboardId}
+        filters={getActiveFilters() || EMPTY_OBJECT}
+        addSuccessToast={boundActionCreators.addSuccessToast}
+        addDangerToast={boundActionCreators.addDangerToast}
+        handleToggleFullSize={props.handleToggleFullSize}
+        isFullSize={props.isFullSize}
+        chartStatus={chartStatus}
+        formData={formData}
+        width={width}
+        height={getHeaderHeight()}
+      />
+
+      {/*
           This usage of dangerouslySetInnerHTML is safe since it is being used to render
-          markdown that is sanitized with bleach. See:
+          markdown that is sanitized with nh3. See:
              https://github.com/apache/superset/pull/4390
           and
-             https://github.com/apache/superset/commit/b6fcc22d5a2cb7a5e92599ed5795a0169385a825
+             https://github.com/apache/superset/pull/23862
         */}
-        {isExpanded && slice.description_markeddown && (
-          <div
-            className="slice_description bs-callout bs-callout-default"
-            ref={this.setDescriptionRef}
-            // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{ __html: slice.description_markeddown }}
+      {isExpanded && slice.description_markeddown && (
+        <div
+          className="slice_description bs-callout bs-callout-default"
+          ref={descriptionRef}
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: slice.description_markeddown }}
+          role="complementary"
+        />
+      )}
+
+      <ChartWrapper
+        className={cx('dashboard-chart')}
+        aria-label={slice.description}
+      >
+        {isLoading && (
+          <ChartOverlay
+            style={{
+              width,
+              height: getChartHeight(),
+            }}
           />
         )}
 
-        <div
-          className={cx(
-            'dashboard-chart',
-            isOverflowable && 'dashboard-chart--overflowable',
-          )}
-        >
-          {isLoading && (
-            <ChartOverlay
-              style={{
-                width,
-                height: this.getChartHeight(),
-              }}
-            />
-          )}
-
-          <ChartContainer
-            width={width}
-            height={this.getChartHeight()}
-            addFilter={this.changeFilter}
-            onFilterMenuOpen={this.handleFilterMenuOpen}
-            onFilterMenuClose={this.handleFilterMenuClose}
-            annotationData={chart.annotationData}
-            chartAlert={chart.chartAlert}
-            chartId={id}
-            chartStatus={chartStatus}
-            datasource={datasource}
-            dashboardId={dashboardId}
-            initialValues={initialValues}
-            formData={formData}
-            labelColors={labelColors}
-            ownState={ownState}
-            filterState={filterState}
-            queriesResponse={chart.queriesResponse}
-            timeout={timeout}
-            triggerQuery={chart.triggerQuery}
-            vizType={slice.viz_type}
-          />
-        </div>
-      </div>
-    );
-  }
-}
+        <ChartContainer
+          width={width}
+          height={getChartHeight()}
+          addFilter={addFilter}
+          onFilterMenuOpen={handleFilterMenuOpen}
+          onFilterMenuClose={handleFilterMenuClose}
+          annotationData={chart.annotationData}
+          chartAlert={chart.chartAlert}
+          chartId={props.id}
+          chartStatus={chartStatus}
+          datasource={datasource}
+          dashboardId={props.dashboardId}
+          initialValues={EMPTY_OBJECT}
+          formData={formData}
+          labelsColor={labelsColor}
+          labelsColorMap={labelsColorMap}
+          ownState={dataMask[props.id]?.ownState}
+          filterState={dataMask[props.id]?.filterState}
+          queriesResponse={chart.queriesResponse}
+          timeout={timeout}
+          triggerQuery={chart.triggerQuery}
+          vizType={slice.viz_type}
+          setControlValue={props.setControlValue}
+          datasetsStatus={datasetsStatus}
+          isInView={props.isInView}
+          emitCrossFilters={emitCrossFilters}
+        />
+      </ChartWrapper>
+    </SliceContainer>
+  );
+};
 
 Chart.propTypes = propTypes;
-Chart.defaultProps = defaultProps;
+
+export default memo(Chart, (prevProps, nextProps) => {
+  if (prevProps.cacheBusterProp !== nextProps.cacheBusterProp) {
+    return false;
+  }
+  return (
+    !nextProps.isComponentVisible ||
+    (prevProps.isInView === nextProps.isInView &&
+      prevProps.componentId === nextProps.componentId &&
+      prevProps.id === nextProps.id &&
+      prevProps.dashboardId === nextProps.dashboardId &&
+      prevProps.extraControls === nextProps.extraControls &&
+      prevProps.handleToggleFullSize === nextProps.handleToggleFullSize &&
+      prevProps.isFullSize === nextProps.isFullSize &&
+      prevProps.setControlValue === nextProps.setControlValue &&
+      prevProps.sliceName === nextProps.sliceName &&
+      prevProps.updateSliceName === nextProps.updateSliceName &&
+      prevProps.width === nextProps.width &&
+      prevProps.height === nextProps.height)
+  );
+});

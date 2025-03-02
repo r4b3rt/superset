@@ -17,7 +17,7 @@
  * under the License.
  */
 import { styled } from '@superset-ui/core';
-import React, { useRef } from 'react';
+import { useRef, FC } from 'react';
 import {
   DragSourceMonitor,
   DropTargetMonitor,
@@ -39,7 +39,7 @@ const Container = styled.div<TitleContainerProps>`
     cursor: ${isDragging ? 'grabbing' : 'pointer'};
     width: 100%;
     display: flex;
-    padding:  ${theme.gridUnit}px
+    padding:  ${theme.gridUnit}px;
   `}
 `;
 
@@ -57,7 +57,7 @@ const DragIcon = styled(Icons.Drag, {
 interface FilterTabTitleProps {
   index: number;
   filterIds: string[];
-  onRearrage: (dragItemIndex: number, targetIndex: number) => void;
+  onRearrange: (dragItemIndex: number, targetIndex: number) => void;
 }
 
 interface DragItem {
@@ -66,9 +66,9 @@ interface DragItem {
   type: string;
 }
 
-export const DraggableFilter: React.FC<FilterTabTitleProps> = ({
+export const DraggableFilter: FC<FilterTabTitleProps> = ({
   index,
-  onRearrage,
+  onRearrange,
   filterIds,
   children,
 }) => {
@@ -120,7 +120,7 @@ export const DraggableFilter: React.FC<FilterTabTitleProps> = ({
         return;
       }
 
-      onRearrage(dragIndex, hoverIndex);
+      onRearrange(dragIndex, hoverIndex);
       // Note: we're mutating the monitor item here.
       // Generally it's better to avoid mutations,
       // but it's good here for the sake of performance
@@ -132,8 +132,13 @@ export const DraggableFilter: React.FC<FilterTabTitleProps> = ({
   drag(drop(ref));
   return (
     <Container ref={ref} isDragging={isDragging}>
-      <DragIcon isDragging={isDragging} alt="Move icon" className="dragIcon" />
-      <div css={{ flexGrow: 4 }}>{children}</div>
+      <DragIcon
+        isDragging={isDragging}
+        alt="Move icon"
+        className="dragIcon"
+        viewBox="4 4 16 16"
+      />
+      <div css={{ flex: 1 }}>{children}</div>
     </Container>
   );
 };

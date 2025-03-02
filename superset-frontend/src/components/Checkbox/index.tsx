@@ -17,4 +17,5 @@
  * under the License.
  */
 export { default } from 'src/components/Checkbox/Checkbox';
+export type { CheckboxProps } from 'src/components/Checkbox/Checkbox';
 export * from 'src/components/Checkbox/CheckboxIcons';

@@ -16,61 +16,48 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
+import { ReactNode, ComponentType, ReactElement, FC } from 'react';
 import { styled, useTheme } from '@superset-ui/core';
-import { AntdCard, Skeleton, ThinSkeleton } from 'src/common/components';
+import { Skeleton, Card } from 'src/components';
 import { Tooltip } from 'src/components/Tooltip';
+import { theme as supersetTheme } from 'src/preamble';
+import { ConfigProvider } from 'antd-v5';
 import ImageLoader, { BackgroundPosition } from './ImageLoader';
+import CertifiedBadge from '../CertifiedBadge';
 
 const ActionsWrapper = styled.div`
   width: 64px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
 `;
 
-const StyledCard = styled(AntdCard)`
-  border: 1px solid #d9dbe4;
-  border-radius: ${({ theme }) => theme.gridUnit}px;
-  overflow: hidden;
+// Styling part 1: Override Card tokens when possible
+const listViewCardTheme = {
+  components: {
+    Card: {
+      colorBgContainer: supersetTheme.colors.grayscale.light5,
+    },
+  },
+};
 
-  .ant-card-body {
-    padding: ${({ theme }) => theme.gridUnit * 4}px
-      ${({ theme }) => theme.gridUnit * 2}px;
-  }
-  .ant-card-meta-detail > div:not(:last-child) {
-    margin-bottom: 0;
-  }
-  .gradient-container {
-    position: relative;
-    height: 100%;
-  }
-  &:hover {
-    box-shadow: 8px 8px 28px 0px rgba(0, 0, 0, 0.24);
-    transition: box-shadow ${({ theme }) => theme.transitionTiming}s ease-in-out;
+// Styling part 2: Use CSS when necessary
+const StyledCard = styled(Card)`
+  ${({ theme }) => `
+    overflow: hidden;
 
-    .gradient-container:after {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
+    .gradient-container {
+      position: relative;
       height: 100%;
-      display: inline-block;
-      background: linear-gradient(
-        180deg,
-        rgba(0, 0, 0, 0) 47.83%,
-        rgba(0, 0, 0, 0.219135) 79.64%,
-        rgba(0, 0, 0, 0.5) 100%
-      );
-
-      transition: background ${({ theme }) => theme.transitionTiming}s
-        ease-in-out;
     }
+    &:hover {
+      box-shadow: 8px 8px 28px 0px ${theme.colors.grayscale.light1};
+      transition: box-shadow ${theme.transitionTiming}s ease-in-out;
 
-    .cover-footer {
-      transform: translateY(0);
+      .cover-footer {
+        transform: translateY(0);
+      }
     }
-  }
+  `}
 `;
 
 const Cover = styled.div`
@@ -87,7 +74,7 @@ const Cover = styled.div`
 const TitleContainer = styled.div`
   display: flex;
   justify-content: flex-start;
-  flex-direction: row;
+  flex-direction: column;
 
   .card-actions {
     margin-left: auto;
@@ -97,6 +84,12 @@ const TitleContainer = styled.div`
       display: flex;
       align-items: center;
     }
+  }
+
+  .titleRow {
+    display: flex;
+    justify-content: flex-start;
+    flex-direction: row;
   }
 `;
 
@@ -111,6 +104,7 @@ const TitleLink = styled.span`
 const TitleRight = styled.span`
   position: absolute;
   right: -1px;
+  font-weight: 400;
   bottom: ${({ theme }) => theme.gridUnit}px;
 `;
 
@@ -135,36 +129,50 @@ const CoverFooterRight = styled.div`
   text-overflow: ellipsis;
 `;
 
+const ThinSkeleton = styled(Skeleton)`
+  h3 {
+    margin: ${({ theme }) => theme.gridUnit}px 0;
+  }
+
+  ul {
+    margin-bottom: 0;
+  }
+`;
+
 const paragraphConfig = { rows: 1, width: 150 };
 
 interface LinkProps {
   to: string;
 }
 
-const AnchorLink: React.FC<LinkProps> = ({ to, children }) => (
+const AnchorLink: FC<LinkProps> = ({ to, children }) => (
   <a href={to}>{children}</a>
 );
 
 interface CardProps {
-  title?: React.ReactNode;
+  title?: ReactNode;
+  subtitle?: ReactNode;
   url?: string;
-  linkComponent?: React.ComponentType<LinkProps>;
-  imgURL?: string;
+  linkComponent?: ComponentType<LinkProps>;
+  imgURL?: string | null;
   imgFallbackURL?: string;
   imgPosition?: BackgroundPosition;
   description: string;
   loading?: boolean;
-  titleRight?: React.ReactNode;
-  coverLeft?: React.ReactNode;
-  coverRight?: React.ReactNode;
-  actions?: React.ReactNode | null;
+  titleRight?: ReactNode;
+  coverLeft?: ReactNode;
+  coverRight?: ReactNode;
+  actions?: ReactNode | null;
   rows?: number | string;
-  avatar?: React.ReactElement | null;
-  cover?: React.ReactNode | null;
+  avatar?: ReactElement | null;
+  cover?: ReactNode | null;
+  certifiedBy?: string;
+  certificationDetails?: string;
 }
 
 function ListViewCard({
   title,
+  subtitle,
   url,
   linkComponent,
   titleRight,
@@ -178,91 +186,107 @@ function ListViewCard({
   loading,
   imgPosition = 'top',
   cover,
+  certifiedBy,
+  certificationDetails,
 }: CardProps) {
   const Link = url && linkComponent ? linkComponent : AnchorLink;
   const theme = useTheme();
   return (
-    <StyledCard
-      data-test="styled-card"
-      cover={
-        cover || (
-          <Cover>
-            <Link to={url!}>
-              <div className="gradient-container">
-                <ImageLoader
-                  src={imgURL || ''}
-                  fallback={imgFallbackURL || ''}
-                  isLoading={loading}
-                  position={imgPosition}
-                />
-              </div>
-            </Link>
-            <CoverFooter className="cover-footer">
-              {!loading && coverLeft && (
-                <CoverFooterLeft>{coverLeft}</CoverFooterLeft>
-              )}
-              {!loading && coverRight && (
-                <CoverFooterRight>{coverRight}</CoverFooterRight>
-              )}
-            </CoverFooter>
-          </Cover>
-        )
-      }
-    >
-      {loading && (
-        <AntdCard.Meta
-          title={
-            <>
-              <TitleContainer>
-                <Skeleton.Input
-                  active
-                  size="small"
-                  css={{
-                    width: Math.trunc(theme.gridUnit * 62.5),
-                  }}
-                />
-                <div className="card-actions">
-                  <Skeleton.Button active shape="circle" />{' '}
-                  <Skeleton.Button
-                    active
-                    css={{
-                      width: theme.gridUnit * 10,
-                    }}
+    <ConfigProvider theme={listViewCardTheme}>
+      <StyledCard
+        data-test="styled-card"
+        padded
+        cover={
+          cover || (
+            <Cover>
+              <Link to={url!}>
+                <div className="gradient-container">
+                  <ImageLoader
+                    src={imgURL || ''}
+                    fallback={imgFallbackURL || ''}
+                    isLoading={loading}
+                    position={imgPosition}
                   />
                 </div>
+              </Link>
+              <CoverFooter className="cover-footer">
+                {!loading && coverLeft && (
+                  <CoverFooterLeft>{coverLeft}</CoverFooterLeft>
+                )}
+                {!loading && coverRight && (
+                  <CoverFooterRight>{coverRight}</CoverFooterRight>
+                )}
+              </CoverFooter>
+            </Cover>
+          )
+        }
+      >
+        {loading && (
+          <Card.Meta
+            title={
+              <>
+                <TitleContainer>
+                  <Skeleton.Input
+                    active
+                    size="small"
+                    css={{
+                      width: Math.trunc(theme.gridUnit * 62.5),
+                    }}
+                  />
+                  <div className="card-actions">
+                    <Skeleton.Button active shape="circle" />{' '}
+                    <Skeleton.Button
+                      active
+                      css={{
+                        width: theme.gridUnit * 10,
+                      }}
+                    />
+                  </div>
+                </TitleContainer>
+              </>
+            }
+            description={
+              <ThinSkeleton
+                round
+                active
+                title={false}
+                paragraph={paragraphConfig}
+              />
+            }
+          />
+        )}
+        {!loading && (
+          <Card.Meta
+            title={
+              <TitleContainer>
+                {subtitle || null}
+                <div className="titleRow">
+                  <Tooltip title={title}>
+                    <TitleLink>
+                      {certifiedBy && (
+                        <>
+                          <CertifiedBadge
+                            certifiedBy={certifiedBy}
+                            details={certificationDetails}
+                          />{' '}
+                        </>
+                      )}
+                      {title}
+                    </TitleLink>
+                  </Tooltip>
+                  {titleRight && <TitleRight>{titleRight}</TitleRight>}
+                  <div className="card-actions" data-test="card-actions">
+                    {actions}
+                  </div>
+                </div>
               </TitleContainer>
-            </>
-          }
-          description={
-            <ThinSkeleton
-              round
-              active
-              title={false}
-              paragraph={paragraphConfig}
-            />
-          }
-        />
-      )}
-      {!loading && (
-        <AntdCard.Meta
-          title={
-            <TitleContainer>
-              <Tooltip title={title}>
-                <TitleLink>
-                  <Link to={url!}>{title}</Link>
-                </TitleLink>
-              </Tooltip>
-              {titleRight && <TitleRight>{titleRight}</TitleRight>}
-              <div className="card-actions" data-test="card-actions">
-                {actions}
-              </div>
-            </TitleContainer>
-          }
-          description={description}
-          avatar={avatar || null}
-        />
-      )}
-    </StyledCard>
+            }
+            description={description}
+            avatar={avatar || null}
+          />
+        )}
+      </StyledCard>
+    </ConfigProvider>
   );
 }
 

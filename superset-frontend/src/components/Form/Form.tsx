@@ -16,11 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import AntDForm, { FormProps } from 'antd/lib/form';
+import AntdForm, { FormProps } from 'antd/lib/form';
 import { styled } from '@superset-ui/core';
 
-const StyledForm = styled(AntDForm)`
+const StyledForm = styled(AntdForm)`
   &.ant-form label {
     font-size: ${({ theme }) => theme.typography.sizes.s}px;
   }
@@ -33,4 +32,4 @@ export default function Form(props: FormProps) {
   return <StyledForm {...props} />;
 }
 
-export { FormProps };
+export type { FormProps };

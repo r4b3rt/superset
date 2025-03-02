@@ -16,10 +16,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { Input } from 'antd';
-import { styled, css, SupersetTheme } from '@superset-ui/core';
+import { styled, css, SupersetTheme, t } from '@superset-ui/core';
+import { Tooltip } from 'src/components/Tooltip';
+import { Input } from 'src/components/Input';
 import InfoTooltip from 'src/components/InfoTooltip';
+import Icons from 'src/components/Icons';
+import Button from 'src/components/Button';
 import errorIcon from 'src/assets/images/icons/error.svg';
 import FormItem from './FormItem';
 import FormLabel from './FormLabel';
@@ -29,17 +31,22 @@ export interface LabeledErrorBoundInputProps {
   validationMethods:
     | { onBlur: (value: any) => void }
     | { onChange: (value: any) => void };
-  errorMessage: string | null;
+  errorMessage?: string | null;
   helpText?: string;
   required?: boolean;
   hasTooltip?: boolean;
   tooltipText?: string | null;
   id?: string;
   classname?: string;
+  visibilityToggle?: boolean;
   [x: string]: any;
 }
 
 const StyledInput = styled(Input)`
+  margin: ${({ theme }) => `${theme.gridUnit}px 0 ${theme.gridUnit * 2}px`};
+`;
+
+const StyledInputPassword = styled(Input.Password)`
   margin: ${({ theme }) => `${theme.gridUnit}px 0 ${theme.gridUnit * 2}px`};
 `;
 
@@ -86,6 +93,12 @@ const StyledFormLabel = styled(FormLabel)`
   margin-bottom: 0;
 `;
 
+const iconReset = css`
+  &.anticon > * {
+    line-height: 0;
+  }
+`;
+
 const LabeledErrorBoundInput = ({
   label,
   validationMethods,
@@ -96,6 +109,9 @@ const LabeledErrorBoundInput = ({
   tooltipText,
   id,
   className,
+  visibilityToggle,
+  get_url,
+  description,
   ...props
 }: LabeledErrorBoundInputProps) => (
   <StyledFormGroup className={className}>
@@ -103,9 +119,7 @@ const LabeledErrorBoundInput = ({
       <StyledFormLabel htmlFor={id} required={required}>
         {label}
       </StyledFormLabel>
-      {hasTooltip && (
-        <InfoTooltip tooltip={`${tooltipText}`} viewBox="0 -1 24 24" />
-      )}
+      {hasTooltip && <InfoTooltip tooltip={`${tooltipText}`} />}
     </StyledAlignment>
     <FormItem
       css={(theme: SupersetTheme) => alertIconStyles(theme, !!errorMessage)}
@@ -114,7 +128,45 @@ const LabeledErrorBoundInput = ({
       help={errorMessage || helpText}
       hasFeedback={!!errorMessage}
     >
-      <StyledInput {...props} {...validationMethods} />
+      {visibilityToggle || props.name === 'password' ? (
+        <StyledInputPassword
+          {...props}
+          {...validationMethods}
+          iconRender={visible =>
+            visible ? (
+              <Tooltip title={t('Hide password.')}>
+                <Icons.EyeInvisibleOutlined iconSize="m" css={iconReset} />
+              </Tooltip>
+            ) : (
+              <Tooltip title={t('Show password.')}>
+                <Icons.EyeOutlined
+                  iconSize="m"
+                  css={iconReset}
+                  data-test="icon-eye"
+                />
+              </Tooltip>
+            )
+          }
+          role="textbox"
+        />
+      ) : (
+        <StyledInput {...props} {...validationMethods} />
+      )}
+      {get_url && description ? (
+        <Button
+          type="link"
+          htmlType="button"
+          buttonStyle="default"
+          onClick={() => {
+            window.open(get_url);
+            return true;
+          }}
+        >
+          Get {description}
+        </Button>
+      ) : (
+        <br />
+      )}
     </FormItem>
   </StyledFormGroup>
 );

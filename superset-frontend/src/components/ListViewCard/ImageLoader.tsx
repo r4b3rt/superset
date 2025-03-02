@@ -16,7 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { useEffect } from 'react';
+import { useEffect, useState, DetailedHTMLProps, HTMLAttributes } from 'react';
+
 import { styled, logging } from '@superset-ui/core';
 
 export type BackgroundPosition = 'top' | 'bottom';
@@ -35,10 +36,7 @@ const ImageContainer = styled.div<ImageContainerProps>`
   margin: 1px 1px 0 1px;
 `;
 interface ImageLoaderProps
-  extends React.DetailedHTMLProps<
-    React.HTMLAttributes<HTMLDivElement>,
-    HTMLDivElement
-  > {
+  extends DetailedHTMLProps<HTMLAttributes<HTMLDivElement>, HTMLDivElement> {
   fallback: string;
   src: string;
   isLoading?: boolean;
@@ -52,7 +50,7 @@ export default function ImageLoader({
   position,
   ...rest
 }: ImageLoaderProps) {
-  const [imgSrc, setImgSrc] = React.useState<string>(fallback);
+  const [imgSrc, setImgSrc] = useState<string>(fallback);
 
   useEffect(() => {
     if (src) {
@@ -79,6 +77,7 @@ export default function ImageLoader({
 
   return (
     <ImageContainer
+      data-test="image-loader"
       src={isLoading ? fallback : imgSrc}
       {...rest}
       position={position}

@@ -16,61 +16,188 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React, { FC, useRef, useEffect } from 'react';
-import { FeatureFlag, isFeatureEnabled, t } from '@superset-ui/core';
-import { useDispatch } from 'react-redux';
-import { useParams } from 'react-router-dom';
+import { createContext, lazy, FC, useEffect, useMemo, useRef } from 'react';
+import { Global } from '@emotion/react';
+import { useHistory } from 'react-router-dom';
+import { t, useTheme } from '@superset-ui/core';
+import { useDispatch, useSelector } from 'react-redux';
+import { createSelector } from '@reduxjs/toolkit';
 import { useToasts } from 'src/components/MessageToasts/withToasts';
 import Loading from 'src/components/Loading';
 import {
   useDashboard,
   useDashboardCharts,
   useDashboardDatasets,
-} from 'src/common/hooks/apiResources';
+} from 'src/hooks/apiResources';
 import { hydrateDashboard } from 'src/dashboard/actions/hydrate';
 import { setDatasources } from 'src/dashboard/actions/datasources';
 import injectCustomCss from 'src/dashboard/util/injectCustomCss';
-import setupPlugins from 'src/setup/setupPlugins';
-import { getFilterSets } from '../actions/nativeFilters';
+import {
+  getAllActiveFilters,
+  getRelevantDataMask,
+} from 'src/dashboard/util/activeAllDashboardFilters';
+import { getActiveFilters } from 'src/dashboard/util/activeDashboardFilters';
+import { LocalStorageKeys, setItem } from 'src/utils/localStorageHelpers';
+import { URL_PARAMS } from 'src/constants';
+import { getUrlParam } from 'src/utils/urlUtils';
+import { setDatasetsStatus } from 'src/dashboard/actions/dashboardState';
+import {
+  getFilterValue,
+  getPermalinkValue,
+} from 'src/dashboard/components/nativeFilters/FilterBar/keyValue';
+import DashboardContainer from 'src/dashboard/containers/Dashboard';
 
-setupPlugins();
-const DashboardContainer = React.lazy(
+import { nanoid } from 'nanoid';
+import { RootState } from '../types';
+import {
+  chartContextMenuStyles,
+  filterCardPopoverStyle,
+  focusStyle,
+  headerStyles,
+  chartHeaderStyles,
+} from '../styles';
+import SyncDashboardState, {
+  getDashboardContextLocalStorage,
+} from '../components/SyncDashboardState';
+
+export const DashboardPageIdContext = createContext('');
+
+const DashboardBuilder = lazy(
   () =>
     import(
       /* webpackChunkName: "DashboardContainer" */
       /* webpackPreload: true */
-      'src/dashboard/containers/Dashboard'
+      'src/dashboard/components/DashboardBuilder/DashboardBuilder'
     ),
 );
 
 const originalDocumentTitle = document.title;
 
-const DashboardPage: FC = () => {
+type PageProps = {
+  idOrSlug: string;
+};
+
+// TODO: move to Dashboard.jsx when it's refactored to functional component
+const selectRelevantDatamask = createSelector(
+  (state: RootState) => state.dataMask, // the first argument accesses relevant data from global state
+  dataMask => getRelevantDataMask(dataMask, 'ownState'), // the second parameter conducts the transformation
+);
+
+const selectChartConfiguration = (state: RootState) =>
+  state.dashboardInfo.metadata?.chart_configuration;
+const selectNativeFilters = (state: RootState) => state.nativeFilters.filters;
+const selectDataMask = (state: RootState) => state.dataMask;
+const selectAllSliceIds = (state: RootState) => state.dashboardState.sliceIds;
+// TODO: move to Dashboard.jsx when it's refactored to functional component
+const selectActiveFilters = createSelector(
+  [
+    selectChartConfiguration,
+    selectNativeFilters,
+    selectDataMask,
+    selectAllSliceIds,
+  ],
+  (chartConfiguration, nativeFilters, dataMask, allSliceIds) => ({
+    ...getActiveFilters(),
+    ...getAllActiveFilters({
+      // eslint-disable-next-line camelcase
+      chartConfiguration,
+      nativeFilters,
+      dataMask,
+      allSliceIds,
+    }),
+  }),
+);
+
+export const DashboardPage: FC<PageProps> = ({ idOrSlug }: PageProps) => {
+  const theme = useTheme();
   const dispatch = useDispatch();
+  const history = useHistory();
+  const dashboardPageId = useMemo(() => nanoid(), []);
+  const hasDashboardInfoInitiated = useSelector<RootState, Boolean>(
+    ({ dashboardInfo }) =>
+      dashboardInfo && Object.keys(dashboardInfo).length > 0,
+  );
   const { addDangerToast } = useToasts();
-  const { idOrSlug } = useParams<{ idOrSlug: string }>();
-  const { result: dashboard, error: dashboardApiError } = useDashboard(
-    idOrSlug,
-  );
-  const { result: charts, error: chartsApiError } = useDashboardCharts(
-    idOrSlug,
-  );
-  const { result: datasets, error: datasetsApiError } = useDashboardDatasets(
-    idOrSlug,
-  );
+  const { result: dashboard, error: dashboardApiError } =
+    useDashboard(idOrSlug);
+  const { result: charts, error: chartsApiError } =
+    useDashboardCharts(idOrSlug);
+  const {
+    result: datasets,
+    error: datasetsApiError,
+    status,
+  } = useDashboardDatasets(idOrSlug);
   const isDashboardHydrated = useRef(false);
 
   const error = dashboardApiError || chartsApiError;
   const readyToRender = Boolean(dashboard && charts);
-  const { dashboard_title, css } = dashboard || {};
+  const { dashboard_title, css, id = 0 } = dashboard || {};
 
-  if (readyToRender && !isDashboardHydrated.current) {
-    isDashboardHydrated.current = true;
-    dispatch(hydrateDashboard(dashboard, charts));
-    if (isFeatureEnabled(FeatureFlag.DASHBOARD_NATIVE_FILTERS_SET)) {
-      dispatch(getFilterSets());
+  useEffect(() => {
+    // mark tab id as redundant when user closes browser tab - a new id will be
+    // generated next time user opens a dashboard and the old one won't be reused
+    const handleTabClose = () => {
+      const dashboardsContexts = getDashboardContextLocalStorage();
+      setItem(LocalStorageKeys.DashboardExploreContext, {
+        ...dashboardsContexts,
+        [dashboardPageId]: {
+          ...dashboardsContexts[dashboardPageId],
+          isRedundant: true,
+        },
+      });
+    };
+    window.addEventListener('beforeunload', handleTabClose);
+    return () => {
+      window.removeEventListener('beforeunload', handleTabClose);
+    };
+  }, [dashboardPageId]);
+
+  useEffect(() => {
+    dispatch(setDatasetsStatus(status));
+  }, [dispatch, status]);
+
+  useEffect(() => {
+    // eslint-disable-next-line consistent-return
+    async function getDataMaskApplied() {
+      const permalinkKey = getUrlParam(URL_PARAMS.permalinkKey);
+      const nativeFilterKeyValue = getUrlParam(URL_PARAMS.nativeFiltersKey);
+      const isOldRison = getUrlParam(URL_PARAMS.nativeFilters);
+
+      let dataMask = nativeFilterKeyValue || {};
+      // activeTabs is initialized with undefined so that it doesn't override
+      // the currently stored value when hydrating
+      let activeTabs: string[] | undefined;
+      if (permalinkKey) {
+        const permalinkValue = await getPermalinkValue(permalinkKey);
+        if (permalinkValue) {
+          ({ dataMask, activeTabs } = permalinkValue.state);
+        }
+      } else if (nativeFilterKeyValue) {
+        dataMask = await getFilterValue(id, nativeFilterKeyValue);
+      }
+      if (isOldRison) {
+        dataMask = isOldRison;
+      }
+
+      if (readyToRender) {
+        if (!isDashboardHydrated.current) {
+          isDashboardHydrated.current = true;
+        }
+        dispatch(
+          hydrateDashboard({
+            history,
+            dashboard,
+            charts,
+            activeTabs,
+            dataMask,
+          }),
+        );
+      }
+      return null;
     }
-  }
+    if (id) getDataMaskApplied();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyToRender]);
 
   useEffect(() => {
     if (dashboard_title) {
@@ -82,7 +209,7 @@ const DashboardPage: FC = () => {
   }, [dashboard_title]);
 
   useEffect(() => {
-    if (css) {
+    if (typeof css === 'string') {
       // returning will clean up custom css
       // when dashboard unmounts or changes
       return injectCustomCss(css);
@@ -100,10 +227,45 @@ const DashboardPage: FC = () => {
     }
   }, [addDangerToast, datasets, datasetsApiError, dispatch]);
 
-  if (error) throw error; // caught in error boundary
-  if (!readyToRender) return <Loading />;
+  const relevantDataMask = useSelector(selectRelevantDatamask);
+  const activeFilters = useSelector(selectActiveFilters);
 
-  return <DashboardContainer />;
+  if (error) throw error; // caught in error boundary
+
+  const globalStyles = useMemo(
+    () => [
+      filterCardPopoverStyle(theme),
+      headerStyles(theme),
+      chartContextMenuStyles(theme),
+      focusStyle(theme),
+      chartHeaderStyles(theme),
+    ],
+    [theme],
+  );
+
+  if (error) throw error; // caught in error boundary
+
+  const DashboardBuilderComponent = useMemo(() => <DashboardBuilder />, []);
+  return (
+    <>
+      <Global styles={globalStyles} />
+      {readyToRender && hasDashboardInfoInitiated ? (
+        <>
+          <SyncDashboardState dashboardPageId={dashboardPageId} />
+          <DashboardPageIdContext.Provider value={dashboardPageId}>
+            <DashboardContainer
+              activeFilters={activeFilters}
+              ownDataCharts={relevantDataMask}
+            >
+              {DashboardBuilderComponent}
+            </DashboardContainer>
+          </DashboardPageIdContext.Provider>
+        </>
+      ) : (
+        <Loading />
+      )}
+    </>
+  );
 };
 
 export default DashboardPage;

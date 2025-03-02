@@ -16,12 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
-import { HTML5Backend } from 'react-dnd-html5-backend';
-import { DndProvider } from 'react-dnd';
-import { render, screen, waitFor } from 'spec/helpers/testing-library';
-import userEvent from '@testing-library/user-event';
+import { ReactChild } from 'react';
+import {
+  cleanup,
+  render,
+  screen,
+  userEvent,
+  waitFor,
+  within,
+} from 'spec/helpers/testing-library';
 import DatasourcePanel, {
+  IDatasource,
   Props as DatasourcePanelProps,
 } from 'src/explore/components/DatasourcePanel';
 import {
@@ -30,24 +35,43 @@ import {
 } from 'src/explore/components/DatasourcePanel/fixtures';
 import { DatasourceType } from '@superset-ui/core';
 import DatasourceControl from 'src/explore/components/controls/DatasourceControl';
+import ExploreContainer from '../ExploreContainer';
+import {
+  DndColumnSelect,
+  DndMetricSelect,
+} from '../controls/DndColumnSelectControl';
 
-const datasource = {
+jest.mock(
+  'react-virtualized-auto-sizer',
+  () =>
+    ({ children }: { children: (params: { height: number }) => ReactChild }) =>
+      children({ height: 500 }),
+);
+
+const datasource: IDatasource = {
   id: 1,
   type: DatasourceType.Table,
-  name: 'birth_names',
   columns,
   metrics,
-  uid: '1__table',
   database: {
-    backend: 'mysql',
-    name: 'main',
+    id: 1,
   },
-  column_format: { ratio: '.2%' },
-  verbose_map: { __timestamp: 'Time' },
-  main_dttm_col: 'None',
   datasource_name: 'table1',
-  description: 'desc',
 };
+
+const mockUser = {
+  createdOn: '2021-04-27T18:12:38.952304',
+  email: 'admin',
+  firstName: 'admin',
+  isActive: true,
+  lastName: 'admin',
+  permissions: {},
+  roles: { Admin: Array(173) },
+  userId: 1,
+  username: 'admin',
+  isAnonymous: false,
+};
+
 const props: DatasourcePanelProps = {
   datasource,
   controls: {
@@ -57,80 +81,125 @@ const props: DatasourcePanelProps = {
       type: DatasourceControl,
       label: 'hello',
       datasource,
+      user: mockUser,
     },
   },
   actions: {
     setControlValue: jest.fn(),
   },
+  width: 300,
 };
 
-const setup = (props: DatasourcePanelProps) => (
-  <DndProvider backend={HTML5Backend}>
-    <DatasourcePanel {...props} />
-  </DndProvider>
-);
+const metricProps = {
+  savedMetrics: [],
+  columns: [],
+  onChange: jest.fn(),
+};
 
-function search(value: string, input: HTMLElement) {
+const search = (value: string, input: HTMLElement) => {
   userEvent.clear(input);
   userEvent.type(input, value);
-}
+};
 
-test('should render', () => {
-  const { container } = render(setup(props));
+test('should render', async () => {
+  const { container } = render(<DatasourcePanel {...props} />, {
+    useRedux: true,
+    useDnd: true,
+  });
+  expect(await screen.findByText(/metrics/i)).toBeInTheDocument();
   expect(container).toBeVisible();
 });
 
-test('should display items in controls', () => {
-  render(setup(props));
-  expect(screen.getByText('birth_names')).toBeInTheDocument();
-  expect(screen.getByText('Metrics')).toBeInTheDocument();
+test('should display items in controls', async () => {
+  render(<DatasourcePanel {...props} />, { useRedux: true, useDnd: true });
+  expect(await screen.findByText('Metrics')).toBeInTheDocument();
   expect(screen.getByText('Columns')).toBeInTheDocument();
 });
 
-test('should render the metrics', () => {
-  render(setup(props));
+test('should render the metrics', async () => {
+  jest.setTimeout(10000);
+  render(
+    <ExploreContainer>
+      <DatasourcePanel {...props} />
+      <DndMetricSelect {...metricProps} />
+    </ExploreContainer>,
+    { useRedux: true, useDnd: true },
+  );
   const metricsNum = metrics.length;
   metrics.forEach(metric =>
     expect(screen.getByText(metric.metric_name)).toBeInTheDocument(),
   );
   expect(
-    screen.getByText(`Showing ${metricsNum} of ${metricsNum}`),
+    await screen.findByText(`Showing ${metricsNum} of ${metricsNum}`),
   ).toBeInTheDocument();
 });
 
-test('should render the columns', () => {
-  render(setup(props));
+test('should render the columns', async () => {
+  render(
+    <ExploreContainer>
+      <DatasourcePanel {...props} />
+      <DndMetricSelect {...metricProps} />
+    </ExploreContainer>,
+    { useRedux: true, useDnd: true },
+  );
   const columnsNum = columns.length;
   columns.forEach(col =>
     expect(screen.getByText(col.column_name)).toBeInTheDocument(),
   );
   expect(
-    screen.getByText(`Showing ${columnsNum} of ${columnsNum}`),
+    await screen.findByText(`Showing ${columnsNum} of ${columnsNum}`),
   ).toBeInTheDocument();
 });
 
-test('should render 0 search results', async () => {
-  render(setup(props));
-  const searchInput = screen.getByPlaceholderText('Search Metrics & Columns');
-
-  search('nothing', searchInput);
-  expect(await screen.findAllByText('Showing 0 of 0')).toHaveLength(2);
-});
-
-test('should search and render matching columns', async () => {
-  render(setup(props));
-  const searchInput = screen.getByPlaceholderText('Search Metrics & Columns');
-
-  search(columns[0].column_name, searchInput);
-
-  await waitFor(() => {
-    expect(screen.getByText(columns[0].column_name)).toBeInTheDocument();
-    expect(screen.queryByText(columns[1].column_name)).not.toBeInTheDocument();
+describe('DatasourcePanel', () => {
+  beforeAll(() => {
+    jest.setTimeout(30000);
   });
+
+  afterEach(async () => {
+    cleanup();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  test('should search and render matching columns', async () => {
+    const { unmount } = render(
+      <ExploreContainer>
+        <DatasourcePanel {...props} />
+        <DndMetricSelect {...metricProps} />
+      </ExploreContainer>,
+      { useRedux: true, useDnd: true },
+    );
+
+    const searchInput = screen.getByPlaceholderText('Search Metrics & Columns');
+
+    await waitFor(() => {
+      expect(searchInput).toBeInTheDocument();
+    });
+
+    search(columns[0].column_name, searchInput);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(columns[0].column_name)).toBeInTheDocument();
+        expect(
+          screen.queryByText(columns[1].column_name),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 10000 },
+    );
+
+    unmount();
+  }, 15000);
 });
 
 test('should search and render matching metrics', async () => {
-  render(setup(props));
+  render(
+    <ExploreContainer>
+      <DatasourcePanel {...props} />
+      <DndMetricSelect {...metricProps} />
+    </ExploreContainer>,
+    { useRedux: true, useDnd: true },
+  );
   const searchInput = screen.getByPlaceholderText('Search Metrics & Columns');
 
   search(metrics[0].metric_name, searchInput);
@@ -146,19 +215,98 @@ test('should render a warning', async () => {
     ...datasource,
     extra: JSON.stringify({ warning_markdown: 'This is a warning.' }),
   };
-  render(
-    setup({
-      ...props,
-      datasource: deprecatedDatasource,
-      controls: {
-        datasource: {
-          ...props.controls.datasource,
-          datasource: deprecatedDatasource,
-        },
+  const newProps = {
+    ...props,
+    datasource: deprecatedDatasource,
+    controls: {
+      datasource: {
+        ...props.controls.datasource,
+        datasource: deprecatedDatasource,
+        user: mockUser,
       },
-    }),
-  );
+    },
+  };
+  render(<DatasourcePanel {...newProps} />, { useRedux: true, useDnd: true });
   expect(
     await screen.findByRole('img', { name: 'alert-solid' }),
   ).toBeInTheDocument();
+});
+
+test('should render a create dataset infobox', async () => {
+  const newProps = {
+    ...props,
+    datasource: {
+      ...datasource,
+      type: DatasourceType.Query,
+    },
+  };
+  render(<DatasourcePanel {...newProps} />, { useRedux: true, useDnd: true });
+
+  const createButton = await screen.findByRole('button', {
+    name: /create a dataset/i,
+  });
+  const infoboxText = screen.getByText(/to edit or add columns and metrics./i);
+
+  expect(createButton).toBeVisible();
+  expect(infoboxText).toBeVisible();
+});
+
+test('should not render a save dataset modal when datasource is not query or dataset', async () => {
+  const newProps = {
+    ...props,
+    datasource: {
+      ...datasource,
+      type: DatasourceType.Table,
+    },
+  };
+  render(<DatasourcePanel {...newProps} />, { useRedux: true, useDnd: true });
+  expect(await screen.findByText(/metrics/i)).toBeInTheDocument();
+
+  expect(screen.queryByText(/create a dataset/i)).not.toBeInTheDocument();
+});
+
+test('should render only droppable metrics and columns', async () => {
+  const column1FilterProps = {
+    type: 'DndColumnSelect' as const,
+    name: 'Filter',
+    onChange: jest.fn(),
+    options: [{ column_name: columns[1].column_name }],
+    actions: { setControlValue: jest.fn() },
+  };
+  const column2FilterProps = {
+    type: 'DndColumnSelect' as const,
+    name: 'Filter',
+    onChange: jest.fn(),
+    options: [
+      { column_name: columns[1].column_name },
+      { column_name: columns[2].column_name },
+    ],
+    actions: { setControlValue: jest.fn() },
+  };
+  const { getByTestId, unmount } = render(
+    <ExploreContainer>
+      <DatasourcePanel {...props} />
+      <DndColumnSelect {...column1FilterProps} />
+      <DndColumnSelect {...column2FilterProps} />
+    </ExploreContainer>,
+    { useRedux: true, useDnd: true },
+  );
+
+  await waitFor(
+    () => {
+      const selections = getByTestId('fieldSelections');
+      expect(
+        within(selections).queryByText(columns[0].column_name),
+      ).not.toBeInTheDocument();
+      expect(
+        within(selections).getByText(columns[1].column_name),
+      ).toBeInTheDocument();
+      expect(
+        within(selections).getByText(columns[2].column_name),
+      ).toBeInTheDocument();
+    },
+    { timeout: 10000 },
+  );
+
+  unmount();
 });

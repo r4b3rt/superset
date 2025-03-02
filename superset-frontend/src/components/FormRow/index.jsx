@@ -16,9 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import React from 'react';
 import PropTypes from 'prop-types';
-import { Row, Col } from 'src/common/components';
+import { Row, Col } from 'src/components';
 
 import { InfoTooltipWithTrigger } from '@superset-ui/chart-controls';
 
